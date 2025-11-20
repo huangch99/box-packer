@@ -5,7 +5,7 @@ import itertools
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Precision 3D Packer", layout="wide")
-st.title("📦 Precision 3D Packer (Final Solver)")
+st.title("📦 Precision 3D Packer (Final Working Version)")
 
 # --- SIDEBAR ---
 st.sidebar.header("1. Container (Fixed)")
@@ -42,7 +42,8 @@ def get_cube_trace(size, position, color, name="", is_wireframe=False):
 # --- MAIN LOGIC ---
 if run_btn:
     # 1. PARSING
-    # IMPORTANT: Use 0 tolerance here because we will fix precision in the packer settings
+    # We subtract a tiny tolerance to prevent 3.75000001 vs 3.75 issues
+    TOLERANCE = 0.001 
     raw_items_data = []
     try:
         lines = items_text.strip().split('\n')
@@ -50,27 +51,23 @@ if run_btn:
             parts = line.split(',')
             if len(parts) >= 4:
                 name = parts[0].strip()
-                l = float(parts[1].strip())
-                w = float(parts[2].strip())
-                h = float(parts[3].strip())
+                l = float(parts[1].strip()) - TOLERANCE
+                w = float(parts[2].strip()) - TOLERANCE
+                h = float(parts[3].strip()) - TOLERANCE
                 raw_items_data.append({'name': name, 'l': l, 'w': w, 'h': h})
     except Exception as e: st.error(f"Error: {e}"); st.stop()
     
     if not raw_items_data: st.stop()
 
     # 2. DEEP SOLVER STRATEGY
-    # We define two "Realities" for the AI to test.
-    # Mode A: Normal (X=L, Y=W, Z=H)
-    # Mode B: Width-Priority (X=L, Y=H, Z=W) -> Sim Z is Real Width
-    # Since the AI greedily minimizes Z (Height), Mode B forces it to minimize Real Width.
-    
+    # Mode A: Standard (X=L, Y=W, Z=H)
+    # Mode B: Width-Saver (X=L, Y=H, Z=W) -> Forces the AI to minimize Width usage
     simulation_modes = [
         {'name': 'Standard', 'dims': [cont_l, cont_w, cont_h], 'map': 'LWH'},
-        {'name': 'Width-Saver', 'dims': [cont_l, cont_h, cont_w], 'map': 'LHW'} # Swap W and H
+        {'name': 'Width-Saver', 'dims': [cont_l, cont_h, cont_w], 'map': 'LHW'}
     ]
     
     # 3. ORDER PERMUTATIONS
-    # Try every order of items (A,B,C), (B,A,C)...
     permutations = list(itertools.permutations(raw_items_data))
     
     best_solution = None
@@ -88,8 +85,8 @@ if run_btn:
             if checks % 5 == 0: progress.progress(checks / total_checks)
             
             packer = Packer()
-            # CRITICAL FIX: number_of_decimals=5 prevents "3.7500001" failures
-            packer.add_bin(Bin('SimBin', sim_dims[0], sim_dims[1], sim_dims[2], 9999, number_of_decimals=5))
+            # FIXED: Removed invalid 'number_of_decimals' argument
+            packer.add_bin(Bin('SimBin', sim_dims[0], sim_dims[1], sim_dims[2], 9999))
             
             for d in order:
                 packer.add_item(Item(d['name'], d['l'], d['w'], d['h'], 1))
@@ -110,8 +107,6 @@ if run_btn:
                     if mode['map'] == 'LHW':
                         # Simulation: X=Length, Y=Height, Z=Width
                         # Reality:    X=Length, Y=Width,  Z=Height
-                        # Map Sim Y -> Real Z
-                        # Map Sim Z -> Real Y
                         real_d = [d[0], d[2], d[1]]
                         real_p = [p[0], p[2], p[1]]
                     else:
@@ -138,7 +133,7 @@ if run_btn:
         if count == len(raw_items_data):
             st.success(f"✅ **Success!** All items fit using {best_solution['mode']} Logic.")
         else:
-            st.error("❌ Still could not fit all items.")
+            st.error("❌ Could not fit all items.")
             if best_solution['unfitted']:
                 st.write("Unfitted: " + ", ".join([i.name for i in best_solution['unfitted']]))
 
@@ -148,7 +143,9 @@ if run_btn:
         
         colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA']
         for i, dat in enumerate(best_solution['items']):
-            fig.add_trace(get_cube_trace(dat['dim'], dat['pos'], colors[i%4], dat['name']))
+            # Add tolerance back so it looks correct
+            d = [dat['dim'][0]+TOLERANCE, dat['dim'][1]+TOLERANCE, dat['dim'][2]+TOLERANCE]
+            fig.add_trace(get_cube_trace(d, dat['pos'], colors[i%4], dat['name']))
 
         fig.update_layout(
             scene=dict(
