@@ -98,3 +98,92 @@ if run_btn:
     best_score = -1
     
     progress = st.progress(0)
+    
+    for i, box_dim in enumerate(box_orientations):
+        progress.progress((i+1) / len(box_orientations))
+        
+        # In py3dbp: Bin(name, width, height, depth)
+        # Map our L,W,H to the library's W,H,D
+        packer = Packer()
+        packer.add_bin(Bin('TestBin', box_dim[0], box_dim[1], box_dim[2], 99999))
+        for item in raw_items:
+            packer.add_item(item)
+        
+        packer.pack()
+        b = packer.bins[0]
+        
+        # --- SCORING ---
+        count = len(b.items)
+        # Floor items (Z ~ 0)
+        floor_items = sum(1 for item in b.items if float(item.position[2]) <= 0.01)
+        # Max Height used
+        max_z = 0
+        if b.items:
+            max_z = max([float(it.position[2]) + float(it.depth) for it in b.items])
+
+        # Score: Count High > Floor High > Height Low
+        score = (count * 10000) + (floor_items * 100) - max_z
+        
+        if score > best_score:
+            best_score = score
+            best_bin = b
+            
+    progress.empty()
+
+    # 5. DISPLAY RESULTS
+    if best_bin:
+        b = best_bin
+        # Dimensions used by the winning box orientation
+        used_l, used_w, used_h = float(b.width), float(b.height), float(b.depth)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Items Packed", f"{len(b.items)} / {len(raw_items)}")
+        
+        floor_count = sum(1 for i in b.items if float(i.position[2]) <= 0.01)
+        c2.metric("Items on Floor", floor_count)
+        
+        was_rotated = sorted([used_l, used_w, used_h]) == sorted(original_dims) and [used_l, used_w, used_h] != original_dims
+        if was_rotated:
+            st.info(f"ℹ️ **Auto-Rotation:** Container rotated to **{used_l:.2f} (L) x {used_w:.2f} (W) x {used_h:.2f} (H)**")
+        else:
+            c3.metric("Container Orientation", f"{used_l:.2f} x {used_w:.2f} x {used_h:.2f}")
+
+        if len(b.unfitted_items) > 0:
+            st.error(f"❌ Could not fit: " + ", ".join([i.name for i in b.unfitted_items]))
+
+        # --- 3D PLOTTING ---
+        fig = go.Figure()
+        
+        # 1. Draw Container Wireframe (Black Outline)
+        # We use the "Used" dimensions found by the AI
+        fig.add_trace(get_cube_trace([used_l, used_w, used_h], (0,0,0), 'black', name="Container", is_wireframe=True))
+        
+        # 2. Draw Items
+        colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3']
+        
+        for idx, item in enumerate(b.items):
+            # Add tolerance back for visual accuracy
+            dims = [float(item.width)+TOLERANCE, float(item.height)+TOLERANCE, float(item.depth)+TOLERANCE]
+            pos = [float(item.position[0]), float(item.position[1]), float(item.position[2])]
+            
+            fig.add_trace(get_cube_trace(
+                dims, pos, 
+                colors[idx % len(colors)], 
+                name=item.name, 
+                opacity=1.0
+            ))
+
+        # 3. FORCE TRUE SCALE (Aspect Ratio = Data)
+        # This ensures 10cm looks like 10cm, not stretched
+        fig.update_layout(
+            scene=dict(
+                xaxis=dict(range=[0, max(used_l, used_w, used_h)], title='Length (X)'),
+                yaxis=dict(range=[0, max(used_l, used_w, used_h)], title='Width (Y)'),
+                zaxis=dict(range=[0, max(used_l, used_w, used_h)], title='Height (Z)'),
+                aspectmode='data' # <--- THIS IS THE KEY FIX
+            ),
+            height=700, 
+            margin=dict(l=0, r=0, b=0, t=0),
+            title=f"True-Scale Visualization ({len(b.items)} Items)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
