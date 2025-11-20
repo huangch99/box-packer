@@ -15,7 +15,7 @@ bin_h = st.sidebar.number_input("Height", value=50, step=1)
 bin_d = st.sidebar.number_input("Depth", value=50, step=1)
 
 st.sidebar.header("2. Packing Strategy")
-enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries 50+ variations to find the best layout.")
+enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries 20+ variations to find the best layout.")
 iterations = st.sidebar.slider("Optimization Attempts", 10, 100, 20) if enable_optimization else 1
 
 st.sidebar.header("3. Items")
@@ -26,6 +26,18 @@ Tube, 5, 5, 45
 BigBox, 25, 25, 25"""
 items_text = st.sidebar.text_area("List (Name, W, H, D)", value=default_items, height=200)
 run_btn = st.sidebar.button("Pack Items", type="primary")
+
+# --- HELPER: CALCULATE VOLUME % ---
+def calculate_volume_utilization(bin_obj):
+    """Manually calculates how full the bin is (0% to 100%)."""
+    bin_vol = float(bin_obj.width) * float(bin_obj.height) * float(bin_obj.depth)
+    if bin_vol == 0: return 0
+    
+    total_item_vol = 0
+    for i in bin_obj.items:
+        total_item_vol += float(i.width) * float(i.height) * float(i.depth)
+        
+    return (total_item_vol / bin_vol) * 100
 
 # --- VISUALIZATION FUNCTION ---
 def get_cube_mesh(size, position, color, opacity=1.0, name=""):
@@ -88,13 +100,10 @@ if run_btn:
     # 2. Optimization Loop
     box_dims = (bin_w, bin_h, bin_d)
     best_bin = None
-    best_score = -1 # Score = Number of items packed
+    best_score = -1 
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
-    # Strategy 1: Standard (Largest to Smallest - Default)
-    # py3dbp sorts internally, but we pass raw list first
     
     strategies = range(iterations) if enable_optimization else range(1)
     
@@ -106,9 +115,9 @@ if run_btn:
         # Run Solver
         result_bin = solve_packing(raw_items, box_dims, use_random=(i > 0))
         
-        # Scoring: Prioritize Count first, then Volume Utilization
+        # Scoring
         packed_count = len(result_bin.items)
-        utilization = result_bin.get_volume_utilization()
+        utilization = calculate_volume_utilization(result_bin) # <--- FIXED HERE
         
         # Simple score: Count * 1000 + Utilization
         score = (packed_count * 1000) + utilization
@@ -129,7 +138,7 @@ if run_btn:
         # Metrics
         c1, c2, c3 = st.columns(3)
         c1.metric("Items Packed", f"{packed_count} / {total_count}")
-        c2.metric("Volume Used", f"{b.get_volume_utilization():.2f}%")
+        c2.metric("Volume Used", f"{calculate_volume_utilization(b):.2f}%") # <--- FIXED HERE
         c3.metric("Attempts", iterations if enable_optimization else 1)
 
         if len(b.unfitted_items) > 0:
