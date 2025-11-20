@@ -7,28 +7,27 @@ import itertools
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Smart 3D Packer", layout="wide")
-st.title("📦 Smart 3D Packing (Floor-Filling Mode)")
+st.title("📦 Smart 3D Packing (Floor-Fill + Auto-Rotation)")
 
 # --- SIDEBAR ---
 st.sidebar.header("1. Container Size")
-bin_w = st.sidebar.number_input("Width", value=50.00, step=0.1, format="%.2f")
-bin_h = st.sidebar.number_input("Height", value=50.00, step=0.1, format="%.2f")
-bin_d = st.sidebar.number_input("Depth", value=50.00, step=0.1, format="%.2f")
+bin_w = st.sidebar.number_input("Width", value=8.25, step=0.01, format="%.2f")
+bin_h = st.sidebar.number_input("Height", value=6.38, step=0.01, format="%.2f")
+bin_d = st.sidebar.number_input("Depth", value=3.75, step=0.01, format="%.2f")
 
 st.sidebar.header("2. Optimization")
-enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries different sorting strategies to find the best fit.")
-iterations = st.sidebar.slider("Attempts", 5, 50, 15) if enable_optimization else 1
+enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Runs multiple strategies (Floor Filling, etc) and rotates the box.")
+iterations = st.sidebar.slider("Attempts per Strategy", 5, 30, 10) if enable_optimization else 1
 
 st.sidebar.header("3. Items")
-default_items = """Laptop, 30.5, 2.25, 20.0
-ShoeBox, 20.1, 10.0, 30.5
-Cube, 15.0, 15.0, 15.0
-Tube, 5.5, 5.5, 45.0
-BigBox, 25.0, 25.0, 25.0"""
+# Defaulting to your specific puzzle case
+default_items = """MSC137A, 3.6, 3.55, 3.35
+MEC102A, 7, 3.7, 2.92
+MAC105A, 4, 2.8, 0.8"""
 items_text = st.sidebar.text_area("List (Name, W, H, D)", value=default_items, height=200)
 run_btn = st.sidebar.button("Pack Items", type="primary")
 
-# --- LOGIC: BOUNDING BOX ---
+# --- HELPER: BOUNDING BOX CALCULATION ---
 def get_bounding_box_stats(bin_obj):
     """Calculates the tightest box that surrounds all packed items."""
     if not bin_obj.items:
@@ -37,6 +36,7 @@ def get_bounding_box_stats(bin_obj):
     max_x, max_y, max_z = 0, 0, 0
     
     for item in bin_obj.items:
+        # Dimensions and positions are floats
         dim_w, dim_h, dim_d = float(item.width), float(item.height), float(item.depth)
         pos_x, pos_y, pos_z = float(item.position[0]), float(item.position[1]), float(item.position[2])
         
@@ -47,12 +47,13 @@ def get_bounding_box_stats(bin_obj):
     used_volume = max_x * max_y * max_z
     return used_volume, (max_x, max_y, max_z)
 
-# --- VISUALIZATION FUNCTION ---
+# --- HELPER: 3D MESH GENERATION ---
 def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
     dx, dy, dz = size
     x, y, z = position
     
     if wireframe:
+        # Draws the outline of a box
         return go.Scatter3d(
             x=[x, x+dx, x+dx, x, x,  x, x+dx, x+dx, x, x,  x, x, x+dx, x+dx, x+dx, x+dx],
             y=[y, y, y+dy, y+dy, y,  y, y, y+dy, y+dy, y,  y, y, y, y, y+dy, y+dy],
@@ -62,6 +63,7 @@ def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
             name=name, hoverinfo='name'
         )
 
+    # Draws a solid box
     x_coords = [x, x+dx, x+dx, x,    x, x+dx, x+dx, x]
     y_coords = [y, y,    y+dy, y+dy, y, y,    y+dy, y+dy]
     z_coords = [z, z,    z,    z,    z+dz, z+dz, z+dz, z+dz]
@@ -76,9 +78,9 @@ def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
         showscale=False, hoverinfo='name'
     )
 
-# --- MAIN LOGIC ---
+# --- MAIN EXECUTION ---
 if run_btn:
-    # 1. Parse Items
+    # 1. Parse Inputs
     raw_items = []
     try:
         lines = items_text.strip().split('\n')
@@ -97,59 +99,56 @@ if run_btn:
     if not raw_items:
         st.stop()
 
-    # 2. Prepare Variations
+    # 2. Setup Optimization Variables
     original_dims = [bin_w, bin_h, bin_d]
+    # Generate all 6 rotations of the container (e.g. 8x6x3, 3x8x6...)
     box_orientations = list(set(itertools.permutations(original_dims)))
     
     best_bin = None
     best_item_count = -1
     min_bounding_vol = float('inf') 
     
+    # Progress Bar Setup
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # We define 4 strategies. 
+    # If optimization is off, we only run Strategy 0 once.
     strategies_count = iterations if enable_optimization else 1
-    total_checks = strategies_count * len(box_orientations)
-    check_idx = 0
-
-    # 3. Run Strategies
+    
+    # 3. The Loop
     for i in range(strategies_count):
         current_items_base = copy.deepcopy(raw_items)
         
-        # --- STRATEGY LOGIC ---
-        # To ensure side-by-side placement, we prioritize Footprint (W*D) sorting.
+        # --- STRATEGY SELECTOR ---
+        # Strategy 0: FLOOR FILLING (Sort by Area: W*D) - Best for side-by-side
+        # Strategy 1: TALL ITEMS FIRST (Sort by Height) - Best for vertical stacking
+        # Strategy 2: BIG ITEMS FIRST (Sort by Volume) - Best for reducing gaps
+        # Strategy 3+: RANDOM - Brute force
         
         if i == 0:
-            # Strategy A: AREA DESCENDING (Best for Floor Filling / Side-by-Side)
-            # Sorts by Bottom Area (Width * Depth)
-            # This makes large flat items go first, creating a "floor"
             current_items_base.sort(key=lambda x: float(x.width)*float(x.depth), reverse=True)
-            strategy_name = "Floor Filler (Area)"
-            
+            strategy_name = "Floor Filling (Area)"
         elif i == 1:
-            # Strategy B: HEIGHT DESCENDING (Layering)
-            # Places tall items first to establish 'walls', or ensures similar heights group together
             current_items_base.sort(key=lambda x: float(x.height), reverse=True)
-            strategy_name = "Height Layering"
-            
+            strategy_name = "Height Stacking"
         elif i == 2:
-            # Strategy C: VOLUME DESCENDING (Standard)
             current_items_base.sort(key=lambda x: float(x.width)*float(x.height)*float(x.depth), reverse=True)
-            strategy_name = "Volume Descending"
-            
+            strategy_name = "Volume Filling"
         else:
-            # Strategy D: RANDOM (Brute force)
             random.shuffle(current_items_base)
             strategy_name = "Random Shuffle"
             
-        for box_dim in box_orientations:
-            check_idx += 1
-            if check_idx % 2 == 0:
-                progress_bar.progress(min(check_idx / total_checks, 1.0))
-                status_text.text(f"Trying: {strategy_name} in {box_dim}...")
-
+        # Inner Loop: Test every Box Orientation for this strategy
+        total_variations = len(box_orientations)
+        for idx, box_dim in enumerate(box_orientations):
+            
+            # UI Feedback
+            if idx % 2 == 0:
+                status_text.text(f"Strategy: {strategy_name} | Box: {box_dim}")
+            
             packer = Packer()
-            # 99999 weight ensures we only care about size
+            # High max_weight because we only care about dimensions
             packer.add_bin(Bin('TestBin', box_dim[0], box_dim[1], box_dim[2], 99999))
             
             for item in current_items_base:
@@ -158,34 +157,38 @@ if run_btn:
             packer.pack()
             result_bin = packer.bins[0]
             
+            # --- SCORING SYSTEM ---
             count = len(result_bin.items)
             bb_vol, bb_dims = get_bounding_box_stats(result_bin)
             
-            # Score: Max Count > Min Volume
+            # Priority 1: Most Items Packed
             if count > best_item_count:
                 best_item_count = count
                 min_bounding_vol = bb_vol
                 best_bin = result_bin
+            # Priority 2: If Counts are equal, prefer the TIGHTEST pack (Smallest Bounding Box)
             elif count == best_item_count:
                 if bb_vol < min_bounding_vol:
                     min_bounding_vol = bb_vol
                     best_bin = result_bin
 
-    progress_bar.empty()
-    status_text.empty()
+    progress_bar.progress(100)
+    status_text.text("Optimization Complete.")
 
-    # 4. Display Results
+    # 4. Render Results
     if best_bin:
         b = best_bin
         bb_vol, bb_dims = get_bounding_box_stats(b)
-        used_w = float(b.width)
-        used_h = float(b.height)
-        used_d = float(b.depth)
+        
+        # Get the dimensions of the WINNING container orientation
+        used_w, used_h, used_d = float(b.width), float(b.height), float(b.depth)
 
+        # Metrics
         c1, c2, c3 = st.columns(3)
         c1.metric("Items Packed", f"{len(b.items)} / {len(raw_items)}")
-        c2.metric("Bounding Box", f"{bb_dims[0]:.2f} x {bb_dims[1]:.2f} x {bb_dims[2]:.2f}")
+        c2.metric("Bounding Box (Actual Size Used)", f"{bb_dims[0]:.2f} x {bb_dims[1]:.2f} x {bb_dims[2]:.2f}")
         
+        # Detect Rotation
         was_rotated = sorted([used_w, used_h, used_d]) == sorted(original_dims) and [used_w, used_h, used_d] != original_dims
         
         if was_rotated:
@@ -194,19 +197,20 @@ if run_btn:
             c3.metric("Box Orientation", f"{used_w:.2f}x{used_h:.2f}x{used_d:.2f}")
 
         if len(b.unfitted_items) > 0:
-            st.warning(f"⚠️ Could not fit: " + ", ".join([i.name for i in b.unfitted_items]))
+            st.error(f"❌ Could not fit: " + ", ".join([i.name for i in b.unfitted_items]))
         else:
-            st.success("✅ All items fit!")
+            st.success("✅ Success! All items fit perfectly.")
 
+        # 3D Plot
         fig = go.Figure()
         
-        # Draw Container
+        # Container (Grey Transparent)
         fig.add_trace(get_cube_mesh([used_w, used_h, used_d], (0,0,0), 'grey', 0.05, 'Container'))
         
-        # Draw Bounding Box
+        # Bounding Box (Red Wireframe)
         fig.add_trace(get_cube_mesh(bb_dims, (0,0,0), 'red', 1.0, 'Bounding Box', wireframe=True))
         
-        # Draw Items
+        # Items (Colored)
         colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3']
         for idx, item in enumerate(b.items):
             dims = [float(item.width), float(item.height), float(item.depth)]
