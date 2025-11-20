@@ -7,17 +7,16 @@ import itertools
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Smart 3D Packer", layout="wide")
-st.title("📦 Smart 3D Packing (Precision Mode)")
+st.title("📦 Smart 3D Packing (Gap Filling Mode)")
 
 # --- SIDEBAR ---
 st.sidebar.header("1. Container Size")
-# UPDATE: format="%.2f" allows 2 decimal places. step=0.1 allows small adjustments.
 bin_w = st.sidebar.number_input("Width", value=50.00, step=0.1, format="%.2f")
 bin_h = st.sidebar.number_input("Height", value=50.00, step=0.1, format="%.2f")
 bin_d = st.sidebar.number_input("Depth", value=50.00, step=0.1, format="%.2f")
 
 st.sidebar.header("2. Optimization")
-enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Shuffles items AND rotates the box to find the best fit.")
+enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries different sorting strategies (Largest First, etc) to fill gaps.")
 iterations = st.sidebar.slider("Attempts", 5, 50, 15) if enable_optimization else 1
 
 st.sidebar.header("3. Items")
@@ -38,9 +37,7 @@ def get_bounding_box_stats(bin_obj):
     max_x, max_y, max_z = 0, 0, 0
     
     for item in bin_obj.items:
-        # Dimensions after packing/rotation
         dim_w, dim_h, dim_d = float(item.width), float(item.height), float(item.depth)
-        # Position
         pos_x, pos_y, pos_z = float(item.position[0]), float(item.position[1]), float(item.position[2])
         
         if pos_x + dim_w > max_x: max_x = pos_x + dim_w
@@ -56,7 +53,6 @@ def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
     x, y, z = position
     
     if wireframe:
-        # Draw lines for bounding box
         return go.Scatter3d(
             x=[x, x+dx, x+dx, x, x,  x, x+dx, x+dx, x, x,  x, x, x+dx, x+dx, x+dx, x+dx],
             y=[y, y, y+dy, y+dy, y,  y, y, y+dy, y+dy, y,  y, y, y, y, y+dy, y+dy],
@@ -66,7 +62,6 @@ def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
             name=name, hoverinfo='name'
         )
 
-    # Solid Cube
     x_coords = [x, x+dx, x+dx, x,    x, x+dx, x+dx, x]
     y_coords = [y, y,    y+dy, y+dy, y, y,    y+dy, y+dy]
     z_coords = [z, z,    z,    z,    z+dz, z+dz, z+dz, z+dz]
@@ -104,6 +99,7 @@ if run_btn:
 
     # 2. Prepare Variations
     original_dims = [bin_w, bin_h, bin_d]
+    # Get all unique orientations of the box (W,H,D), (D,W,H), etc.
     box_orientations = list(set(itertools.permutations(original_dims)))
     
     # 3. Run Optimization Loop
@@ -114,21 +110,45 @@ if run_btn:
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    total_checks = iterations * len(box_orientations) if enable_optimization else len(box_orientations)
+    # Total attempts logic
+    strategies_count = iterations if enable_optimization else 1
+    total_checks = strategies_count * len(box_orientations)
     check_idx = 0
 
-    strategies = range(iterations) if enable_optimization else range(1)
-    
-    for i in strategies:
+    for i in range(strategies_count):
         current_items_base = copy.deepcopy(raw_items)
-        if i > 0:
-            random.shuffle(current_items_base)
+        
+        # --- SMART SORTING STRATEGIES ---
+        # To fill "remaining space" effectively, order matters mostly.
+        
+        if i == 0:
+            # Strategy A: VOLUME DESCENDING (Big items first)
+            # This is usually the best way to ensure small items fit in remaining gaps.
+            current_items_base.sort(key=lambda x: float(x.width)*float(x.height)*float(x.depth), reverse=True)
+            strategy_name = "Volume Descending"
             
+        elif i == 1:
+            # Strategy B: LONGEST SIDE DESCENDING
+            # Helps fit long tubes/poles first
+            current_items_base.sort(key=lambda x: max(float(x.width), float(x.height), float(x.depth)), reverse=True)
+            strategy_name = "Max Dimension Descending"
+            
+        elif i == 2:
+            # Strategy C: WIDEST FOOTPRINT
+            current_items_base.sort(key=lambda x: float(x.width)*float(x.depth), reverse=True)
+            strategy_name = "Area Descending"
+            
+        else:
+            # Strategy D: RANDOM SHUFFLE (Brute force)
+            random.shuffle(current_items_base)
+            strategy_name = "Random Shuffle"
+            
+        # Try every Box Orientation for this sorted list
         for box_dim in box_orientations:
             check_idx += 1
-            if check_idx % 5 == 0:
+            if check_idx % 2 == 0:
                 progress_bar.progress(min(check_idx / total_checks, 1.0))
-                status_text.text(f"Testing layout {check_idx}...")
+                status_text.text(f"Testing: {strategy_name} in {box_dim} box...")
 
             packer = Packer()
             packer.add_bin(Bin('TestBin', box_dim[0], box_dim[1], box_dim[2], 99999))
@@ -141,6 +161,10 @@ if run_btn:
             
             count = len(result_bin.items)
             bb_vol, bb_dims = get_bounding_box_stats(result_bin)
+            
+            # SCORING: 
+            # 1. Maximize Count
+            # 2. Minimize Bounding Box Volume (Tightness)
             
             if count > best_item_count:
                 best_item_count = count
@@ -204,6 +228,6 @@ if run_btn:
             ),
             height=700,
             margin=dict(l=0, r=0, b=0, t=0),
-            title=f"Best Fit ({used_w:.2f}x{used_h:.2f}x{used_d:.2f})"
+            title=f"Best Fit ({len(b.items)} items)"
         )
         st.plotly_chart(fig, use_container_width=True)
