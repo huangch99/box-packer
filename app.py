@@ -7,25 +7,25 @@ import itertools
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Smart 3D Packer", layout="wide")
-st.title("📦 Smart 3D Packing (Auto-Rotate Container)")
+st.title("📦 Smart 3D Packing (Precision Mode)")
 
 # --- SIDEBAR ---
 st.sidebar.header("1. Container Size")
-bin_w = st.sidebar.number_input("Width", value=50, step=1)
-bin_h = st.sidebar.number_input("Height", value=50, step=1)
-bin_d = st.sidebar.number_input("Depth", value=50, step=1)
+# UPDATE: format="%.2f" allows 2 decimal places. step=0.1 allows small adjustments.
+bin_w = st.sidebar.number_input("Width", value=50.00, step=0.1, format="%.2f")
+bin_h = st.sidebar.number_input("Height", value=50.00, step=0.1, format="%.2f")
+bin_d = st.sidebar.number_input("Depth", value=50.00, step=0.1, format="%.2f")
 
 st.sidebar.header("2. Optimization")
 enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Shuffles items AND rotates the box to find the best fit.")
-# We reduce default iterations slightly because we now multiply by 6 rotations per attempt
 iterations = st.sidebar.slider("Attempts", 5, 50, 15) if enable_optimization else 1
 
 st.sidebar.header("3. Items")
-default_items = """Laptop, 30, 2, 20
-ShoeBox, 20, 10, 30
-Cube, 15, 15, 15
-Tube, 5, 5, 45
-BigBox, 25, 25, 25"""
+default_items = """Laptop, 30.5, 2.25, 20.0
+ShoeBox, 20.1, 10.0, 30.5
+Cube, 15.0, 15.0, 15.0
+Tube, 5.5, 5.5, 45.0
+BigBox, 25.0, 25.0, 25.0"""
 items_text = st.sidebar.text_area("List (Name, W, H, D)", value=default_items, height=200)
 run_btn = st.sidebar.button("Pack Items", type="primary")
 
@@ -57,7 +57,6 @@ def get_cube_mesh(size, position, color, opacity=1.0, name="", wireframe=False):
     
     if wireframe:
         # Draw lines for bounding box
-        # A single continuous line trace to outline a cube
         return go.Scatter3d(
             x=[x, x+dx, x+dx, x, x,  x, x+dx, x+dx, x, x,  x, x, x+dx, x+dx, x+dx, x+dx],
             y=[y, y, y+dy, y+dy, y,  y, y, y+dy, y+dy, y,  y, y, y, y, y+dy, y+dy],
@@ -104,8 +103,6 @@ if run_btn:
         st.stop()
 
     # 2. Prepare Variations
-    # We want to test the Box in all orientations: (W,H,D), (W,D,H), (H,W,D)...
-    # Use set() to avoid duplicates if dimensions are same (e.g. 50x50x50)
     original_dims = [bin_w, bin_h, bin_d]
     box_orientations = list(set(itertools.permutations(original_dims)))
     
@@ -123,21 +120,17 @@ if run_btn:
     strategies = range(iterations) if enable_optimization else range(1)
     
     for i in strategies:
-        # Shuffle items for this strategy attempt (except first run)
         current_items_base = copy.deepcopy(raw_items)
         if i > 0:
             random.shuffle(current_items_base)
             
-        # Try every Box Orientation for this item order
         for box_dim in box_orientations:
             check_idx += 1
-            if check_idx % 5 == 0: # Update UI occasionally
-                progress_bar.progress(check_idx / total_checks)
-                status_text.text(f"Testing orientation {box_dim}...")
+            if check_idx % 5 == 0:
+                progress_bar.progress(min(check_idx / total_checks, 1.0))
+                status_text.text(f"Testing layout {check_idx}...")
 
-            # Setup Packer
             packer = Packer()
-            # Note: We use the *permuted* box dimensions here
             packer.add_bin(Bin('TestBin', box_dim[0], box_dim[1], box_dim[2], 99999))
             
             for item in current_items_base:
@@ -146,11 +139,9 @@ if run_btn:
             packer.pack()
             result_bin = packer.bins[0]
             
-            # SCORING
             count = len(result_bin.items)
             bb_vol, bb_dims = get_bounding_box_stats(result_bin)
             
-            # Criteria: More items > Smaller Bounding Box
             if count > best_item_count:
                 best_item_count = count
                 min_bounding_vol = bb_vol
@@ -167,9 +158,6 @@ if run_btn:
     if best_bin:
         b = best_bin
         bb_vol, bb_dims = get_bounding_box_stats(b)
-        
-        # IMPORTANT: The 'best_bin' has the dimensions of the WINNING rotation.
-        # We display these to the user.
         used_w = float(b.width)
         used_h = float(b.height)
         used_d = float(b.depth)
@@ -177,15 +165,14 @@ if run_btn:
         # Metrics
         c1, c2, c3 = st.columns(3)
         c1.metric("Items Packed", f"{len(b.items)} / {len(raw_items)}")
-        c2.metric("Bounding Box", f"{bb_dims[0]:.1f} x {bb_dims[1]:.1f} x {bb_dims[2]:.1f}")
+        c2.metric("Bounding Box", f"{bb_dims[0]:.2f} x {bb_dims[1]:.2f} x {bb_dims[2]:.2f}")
         
-        # Check if box was rotated
         was_rotated = sorted([used_w, used_h, used_d]) == sorted(original_dims) and [used_w, used_h, used_d] != original_dims
         
         if was_rotated:
-            st.info(f"ℹ️ **Auto-Rotation:** The box was rotated to **{used_w} x {used_h} x {used_d}** to fit the items.")
+            st.info(f"ℹ️ **Auto-Rotation:** The box was rotated to **{used_w:.2f} x {used_h:.2f} x {used_d:.2f}** to fit the items.")
         else:
-            c3.metric("Box Orientation", f"{used_w}x{used_h}x{used_d}")
+            c3.metric("Box Orientation", f"{used_w:.2f}x{used_h:.2f}x{used_d:.2f}")
 
         if len(b.unfitted_items) > 0:
             st.warning(f"⚠️ Could not fit: " + ", ".join([i.name for i in b.unfitted_items]))
@@ -195,10 +182,10 @@ if run_btn:
         # 5. 3D Visualization
         fig = go.Figure()
         
-        # Draw Container (Using the WINNING dimensions)
+        # Draw Container
         fig.add_trace(get_cube_mesh([used_w, used_h, used_d], (0,0,0), 'grey', 0.05, 'Container'))
         
-        # Draw Bounding Box (Red Wireframe)
+        # Draw Bounding Box
         fig.add_trace(get_cube_mesh(bb_dims, (0,0,0), 'red', 1.0, 'Bounding Box', wireframe=True))
         
         # Draw Items
@@ -217,6 +204,6 @@ if run_btn:
             ),
             height=700,
             margin=dict(l=0, r=0, b=0, t=0),
-            title=f"Best Fit: {len(b.items)} items in {used_w}x{used_h}x{used_d} orientation"
+            title=f"Best Fit ({used_w:.2f}x{used_h:.2f}x{used_d:.2f})"
         )
         st.plotly_chart(fig, use_container_width=True)
