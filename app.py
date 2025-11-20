@@ -7,7 +7,7 @@ import itertools
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Smart 3D Packer", layout="wide")
-st.title("📦 Smart 3D Packing (Gap Filling Mode)")
+st.title("📦 Smart 3D Packing (Floor-Filling Mode)")
 
 # --- SIDEBAR ---
 st.sidebar.header("1. Container Size")
@@ -16,7 +16,7 @@ bin_h = st.sidebar.number_input("Height", value=50.00, step=0.1, format="%.2f")
 bin_d = st.sidebar.number_input("Depth", value=50.00, step=0.1, format="%.2f")
 
 st.sidebar.header("2. Optimization")
-enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries different sorting strategies (Largest First, etc) to fill gaps.")
+enable_optimization = st.sidebar.checkbox("🚀 AI Auto-Optimize", value=True, help="Tries different sorting strategies to find the best fit.")
 iterations = st.sidebar.slider("Attempts", 5, 50, 15) if enable_optimization else 1
 
 st.sidebar.header("3. Items")
@@ -99,10 +99,8 @@ if run_btn:
 
     # 2. Prepare Variations
     original_dims = [bin_w, bin_h, bin_d]
-    # Get all unique orientations of the box (W,H,D), (D,W,H), etc.
     box_orientations = list(set(itertools.permutations(original_dims)))
     
-    # 3. Run Optimization Loop
     best_bin = None
     best_item_count = -1
     min_bounding_vol = float('inf') 
@@ -110,124 +108,4 @@ if run_btn:
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Total attempts logic
-    strategies_count = iterations if enable_optimization else 1
-    total_checks = strategies_count * len(box_orientations)
-    check_idx = 0
-
-    for i in range(strategies_count):
-        current_items_base = copy.deepcopy(raw_items)
-        
-        # --- SMART SORTING STRATEGIES ---
-        # To fill "remaining space" effectively, order matters mostly.
-        
-        if i == 0:
-            # Strategy A: VOLUME DESCENDING (Big items first)
-            # This is usually the best way to ensure small items fit in remaining gaps.
-            current_items_base.sort(key=lambda x: float(x.width)*float(x.height)*float(x.depth), reverse=True)
-            strategy_name = "Volume Descending"
-            
-        elif i == 1:
-            # Strategy B: LONGEST SIDE DESCENDING
-            # Helps fit long tubes/poles first
-            current_items_base.sort(key=lambda x: max(float(x.width), float(x.height), float(x.depth)), reverse=True)
-            strategy_name = "Max Dimension Descending"
-            
-        elif i == 2:
-            # Strategy C: WIDEST FOOTPRINT
-            current_items_base.sort(key=lambda x: float(x.width)*float(x.depth), reverse=True)
-            strategy_name = "Area Descending"
-            
-        else:
-            # Strategy D: RANDOM SHUFFLE (Brute force)
-            random.shuffle(current_items_base)
-            strategy_name = "Random Shuffle"
-            
-        # Try every Box Orientation for this sorted list
-        for box_dim in box_orientations:
-            check_idx += 1
-            if check_idx % 2 == 0:
-                progress_bar.progress(min(check_idx / total_checks, 1.0))
-                status_text.text(f"Testing: {strategy_name} in {box_dim} box...")
-
-            packer = Packer()
-            packer.add_bin(Bin('TestBin', box_dim[0], box_dim[1], box_dim[2], 99999))
-            
-            for item in current_items_base:
-                packer.add_item(item)
-            
-            packer.pack()
-            result_bin = packer.bins[0]
-            
-            count = len(result_bin.items)
-            bb_vol, bb_dims = get_bounding_box_stats(result_bin)
-            
-            # SCORING: 
-            # 1. Maximize Count
-            # 2. Minimize Bounding Box Volume (Tightness)
-            
-            if count > best_item_count:
-                best_item_count = count
-                min_bounding_vol = bb_vol
-                best_bin = result_bin
-            elif count == best_item_count:
-                if bb_vol < min_bounding_vol:
-                    min_bounding_vol = bb_vol
-                    best_bin = result_bin
-
-    progress_bar.empty()
-    status_text.empty()
-
-    # 4. Display Results
-    if best_bin:
-        b = best_bin
-        bb_vol, bb_dims = get_bounding_box_stats(b)
-        used_w = float(b.width)
-        used_h = float(b.height)
-        used_d = float(b.depth)
-
-        # Metrics
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Items Packed", f"{len(b.items)} / {len(raw_items)}")
-        c2.metric("Bounding Box", f"{bb_dims[0]:.2f} x {bb_dims[1]:.2f} x {bb_dims[2]:.2f}")
-        
-        was_rotated = sorted([used_w, used_h, used_d]) == sorted(original_dims) and [used_w, used_h, used_d] != original_dims
-        
-        if was_rotated:
-            st.info(f"ℹ️ **Auto-Rotation:** The box was rotated to **{used_w:.2f} x {used_h:.2f} x {used_d:.2f}** to fit the items.")
-        else:
-            c3.metric("Box Orientation", f"{used_w:.2f}x{used_h:.2f}x{used_d:.2f}")
-
-        if len(b.unfitted_items) > 0:
-            st.warning(f"⚠️ Could not fit: " + ", ".join([i.name for i in b.unfitted_items]))
-        else:
-            st.success("✅ All items fit!")
-
-        # 5. 3D Visualization
-        fig = go.Figure()
-        
-        # Draw Container
-        fig.add_trace(get_cube_mesh([used_w, used_h, used_d], (0,0,0), 'grey', 0.05, 'Container'))
-        
-        # Draw Bounding Box
-        fig.add_trace(get_cube_mesh(bb_dims, (0,0,0), 'red', 1.0, 'Bounding Box', wireframe=True))
-        
-        # Draw Items
-        colors = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3']
-        for idx, item in enumerate(b.items):
-            dims = [float(item.width), float(item.height), float(item.depth)]
-            pos = [float(item.position[0]), float(item.position[1]), float(item.position[2])]
-            fig.add_trace(get_cube_mesh(dims, pos, colors[idx % len(colors)], 1.0, item.name))
-
-        fig.update_layout(
-            scene=dict(
-                xaxis=dict(range=[0, used_w], title='W'),
-                yaxis=dict(range=[0, used_h], title='H'),
-                zaxis=dict(range=[0, used_d], title='D'),
-                aspectmode='data'
-            ),
-            height=700,
-            margin=dict(l=0, r=0, b=0, t=0),
-            title=f"Best Fit ({len(b.items)} items)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    strateg
