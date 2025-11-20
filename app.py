@@ -54,7 +54,7 @@ def get_cube_trace(size, position, color, name="", is_wireframe=False):
 if run_btn:
     # 1. PARSING
     # Subtract 0.005 to handle "3.75 vs 3.75" floating point errors
-    TOLERANCE = 0.005 
+    TOLERANCE = 0.000005 
     raw_items_data = []
     try:
         lines = items_text.strip().split('\n')
