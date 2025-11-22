@@ -12,18 +12,6 @@ st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to S
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
 
-# Initialize Item Dims in Session State
-if 'item_l' not in st.session_state: st.session_state.item_l = 5.0
-if 'item_w' not in st.session_state: st.session_state.item_w = 5.0
-if 'item_h' not in st.session_state: st.session_state.item_h = 5.0
-
-# --- CALLBACKS ---
-def swap_input_dims():
-    """Swaps Item Width and Height values in the sidebar input form"""
-    temp = st.session_state.item_w
-    st.session_state.item_w = st.session_state.item_h
-    st.session_state.item_h = temp
-
 # --- SIDEBAR: CONFIGURATION ---
 st.sidebar.header("1. Define Box (Inner Dims)")
 box_l = st.sidebar.number_input("Box Length", min_value=0.1, value=12.0)
@@ -36,23 +24,22 @@ st.sidebar.header("2. Add Items")
 item_name = st.sidebar.text_input("Item Name", value="Product A")
 
 c1, c2, c3 = st.sidebar.columns(3)
-i_l = c1.number_input("L", min_value=0.1, key='item_l')
-i_w = c2.number_input("W", min_value=0.1, key='item_w')
-i_h = c3.number_input("H", min_value=0.1, key='item_h')
-
-# Sidebar Swap Button
-st.sidebar.button("🔄 Swap Input W ↔ H", on_click=swap_input_dims)
+# Removed session state keys and swap logic from here
+i_l = c1.number_input("L", min_value=0.1, value=5.0)
+i_w = c2.number_input("W", min_value=0.1, value=5.0)
+i_h = c3.number_input("H", min_value=0.1, value=5.0)
 
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
 if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
+        # We use the direct variables (i_l, i_w, i_h) now
         st.session_state.items_to_pack.append({
             "name": item_name,
-            "l": st.session_state.item_l, 
-            "w": st.session_state.item_w, 
-            "h": st.session_state.item_h,
+            "l": i_l, 
+            "w": i_w, 
+            "h": i_h,
             "color": i_color
         })
     st.success(f"Added {i_qty} x {item_name}")
@@ -64,7 +51,7 @@ if st.sidebar.button("Clear Entire List"):
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 
 if len(st.session_state.items_to_pack) > 0:
-    # Header Row - Added extra columns for buttons
+    # Header Row
     # Columns: [ID, Name, Dims, Color, SwapBtn, DelBtn]
     c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2.5, 2, 1, 0.5, 0.5])
     c1.markdown("**No.**")
@@ -85,7 +72,7 @@ if len(st.session_state.items_to_pack) > 0:
         with c3: st.write(f"{item['l']} x {item['w']} x {item['h']}")
         with c4: st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
         
-        # SWAP BUTTON FOR EXISTING ITEM
+        # SWAP BUTTON (In List)
         with c5:
             if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
                 # Swap logic
