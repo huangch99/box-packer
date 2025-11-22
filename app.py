@@ -6,7 +6,7 @@ import decimal
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
 st.title("📦 Multi-Item Shipping Calculator")
-st.markdown("**Logic:** Uses the `py3dbp` algorithm. Items that **do not fit** will be stacked outside the box for visual comparison.")
+st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing to optimize space.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
@@ -17,7 +17,6 @@ st.sidebar.header("1. Define Box (Inner Dims)")
 box_l = st.sidebar.number_input("Box Length", value=12.0)
 box_w = st.sidebar.number_input("Box Width", value=12.0)
 box_h = st.sidebar.number_input("Box Height", value=12.0)
-# Internally set weight to infinity
 st.sidebar.caption("Weight capacity is disabled (Calculates by Size only)")
 
 st.sidebar.markdown("---")
@@ -45,6 +44,7 @@ if st.sidebar.button("Clear List"):
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 if len(st.session_state.items_to_pack) > 0:
+    # Show the list, but note that calculation will sort them later
     st.dataframe(st.session_state.items_to_pack)
 else:
     st.info("Add items from the sidebar to start.")
@@ -84,34 +84,38 @@ def analyze_failure(bin_obj, item_obj):
     """
     Determines why an item failed to pack based on geometry only.
     """
-    # 1. Check Dimensions
     bin_dims = sorted([float(bin_obj.width), float(bin_obj.height), float(bin_obj.depth)])
     item_dims = sorted([float(item_obj.width), float(item_obj.height), float(item_obj.depth)])
     
     if any(i > b for i, b in zip(item_dims, bin_dims)):
         return "❌ Item is too large for box (Dimensions mismatch)"
-
-    # 2. Space (Since weight is ignored)
     return "📦 Not enough remaining space (or fragmentation)"
 
 # --- CALCULATION LOGIC ---
-if st.button("Calculate Packing", type="primary"):
+if st.button("Calculate Packing (Largest First)", type="primary"):
     if not st.session_state.items_to_pack:
         st.warning("Please add items first.")
     else:
+        # --- STEP 1: SORT ITEMS BY VOLUME (DESCENDING) ---
+        # We sort the session list temporarily for this calculation
+        sorted_items = sorted(
+            st.session_state.items_to_pack, 
+            key=lambda x: x['l'] * x['w'] * x['h'], 
+            reverse=True
+        )
+        
         packer = Packer()
-        # We set max weight to a huge number so it is effectively ignored
         IGNORED_WEIGHT_LIMIT = 999999999 
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
-        for i, item in enumerate(st.session_state.items_to_pack):
-            # We give every item a dummy weight of 1.
+        # Add items in the new sorted order
+        for i, item in enumerate(sorted_items):
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
+        # Pack
         packer.pack()
-
         box = packer.bins[0]
         
         col1, col2 = st.columns([1, 3])
@@ -119,7 +123,6 @@ if st.button("Calculate Packing", type="primary"):
         with col1:
             st.subheader("Results")
             
-            # Stats
             total_volume = box_l * box_w * box_h
             used_volume = float(box.get_volume())
             efficiency = (used_volume / total_volume) * 100
@@ -127,13 +130,11 @@ if st.button("Calculate Packing", type="primary"):
             st.metric("Packed Items", len(box.items))
             st.metric("Volume Utilization", f"{efficiency:.1f}%")
 
-            # Success Check
             if len(box.unfitted_items) == 0:
                 st.success("✅ All items fit!")
             else:
                 st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
-                st.info("Unfitted items are shown OUTSIDE the box.")
-                st.markdown("### Failed Items Analysis:")
+                st.info("Items processed Largest -> Smallest.")
                 
                 for item in box.unfitted_items:
                     reason = analyze_failure(box, item)
@@ -142,56 +143,46 @@ if st.button("Calculate Packing", type="primary"):
                         st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
 
         with col2:
-            # Calculate plot limits to include external items
             max_x_draw = box_l
-            
             fig = go.Figure()
             
-            # 1. Draw Container Wireframe
+            # Draw Wireframe
             fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
-            # 2. Draw Packed Items (Fitted)
+            # Draw Packed Items
             for item in box.items:
                 x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
                 w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
                 color = getattr(item, 'color', 'gray')
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
-            # 3. Draw Unfitted Items (Outside the box)
+            # Draw Unfitted Items
             if len(box.unfitted_items) > 0:
-                # Start stacking them to the right of the box with a small gap
                 gap = box_l * 0.1
                 start_x = box_l + gap
                 current_z = 0
                 
                 for item in box.unfitted_items:
-                    # We use original dims because rotation wasn't calculated for unfitted items
                     w, h, d = float(item.width), float(item.height), float(item.depth)
-                    
-                    # Draw trace
                     color = getattr(item, 'color', 'red')
                     fig.add_trace(get_cube_trace(start_x, 0, current_z, w, h, d, color, f"FAILED: {item.name}", opacity=0.5))
                     
-                    # Stack upwards
                     current_z += d
-                    # Update max X for camera scaling
                     if (start_x + w) > max_x_draw:
                         max_x_draw = start_x + w
 
-                # Add a label for the overflow stack
                 fig.add_trace(go.Scatter3d(
                     x=[start_x], y=[0], z=[current_z + 1],
                     mode='text', text=['Did Not Fit'],
                     textfont=dict(color='red', size=12)
                 ))
 
-            # Update Layout for Aspect Ratio
             layout = go.Layout(
                 scene=dict(
                     xaxis=dict(title='Length (x)', range=[0, max_x_draw * 1.1]),
-                    yaxis=dict(title='Width (y)', range=[0, max(box_w, box_l)]), # Keep proportional
+                    yaxis=dict(title='Width (y)', range=[0, max(box_w, box_l)]),
                     zaxis=dict(title='Height (z)', range=[0, max(box_h, box_l)]),
-                    aspectmode='data' # This forces 1 unit = 1 unit visually
+                    aspectmode='data'
                 ),
                 margin=dict(l=0, r=0, b=0, t=0),
                 height=600
