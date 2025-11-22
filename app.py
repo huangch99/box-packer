@@ -1,61 +1,67 @@
 import streamlit as st
 import plotly.graph_objects as go
-import numpy as np
+from py3dbp import Packer, Bin, Item
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Box Fit Visualizer", layout="wide")
+st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
+st.title("📦 Multi-Item Shipping Calculator")
+st.markdown("**Logic:** Uses the `py3dbp` algorithm to stack multiple items (Tetris-style) into a single box.")
 
-st.title("📦 Shipping Box Fit Calculator")
-st.markdown("""
-**Expert Logic:** This tool calculates if an item fits in a box by automatically attempting 
-to rotate the item along all 3 axes (Length, Width, Height) to find the best fit.
-""")
+# --- SESSION STATE INITIALIZATION ---
+# This keeps track of the items you add to the list
+if 'items_to_pack' not in st.session_state:
+    st.session_state.items_to_pack = []
 
-# --- SIDEBAR INPUTS ---
-st.sidebar.header("1. Box Dimensions (Inner)")
-box_l = st.sidebar.number_input("Box Length", min_value=0.1, value=12.0)
-box_w = st.sidebar.number_input("Box Width", min_value=0.1, value=8.0)
-box_h = st.sidebar.number_input("Box Height", min_value=0.1, value=6.0)
+# --- SIDEBAR: CONFIGURATION ---
+st.sidebar.header("1. Define Box (Inner Dims)")
+box_l = st.sidebar.number_input("Box Length", value=12.0)
+box_w = st.sidebar.number_input("Box Width", value=12.0)
+box_h = st.sidebar.number_input("Box Height", value=12.0)
+max_weight = st.sidebar.number_input("Max Weight Capacity", value=50.0)
 
-st.sidebar.header("2. Item Dimensions")
-item_l = st.sidebar.number_input("Item Length", min_value=0.1, value=10.0)
-item_w = st.sidebar.number_input("Item Width", min_value=0.1, value=5.0)
-item_h = st.sidebar.number_input("Item Height", min_value=0.1, value=4.0)
+st.sidebar.markdown("---")
+st.sidebar.header("2. Add Items")
+item_name = st.sidebar.text_input("Item Name", value="Product A")
+c1, c2, c3 = st.sidebar.columns(3)
+i_l = c1.number_input("L", value=5.0)
+i_w = c2.number_input("W", value=5.0)
+i_h = c3.number_input("H", value=5.0)
+i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
+i_color = st.sidebar.color_picker("Color", "#00CC96")
 
-st.sidebar.header("3. Packing Configuration")
-padding = st.sidebar.number_input("Padding/Tolerance (per side)", min_value=0.0, value=0.0, help="Space reserved for bubble wrap or peanuts")
+if st.sidebar.button("Add Item to List"):
+    # Add the item details to session state
+    for _ in range(int(i_qty)):
+        st.session_state.items_to_pack.append({
+            "name": item_name,
+            "l": i_l, "w": i_w, "h": i_h,
+            "color": i_color
+        })
+    st.success(f"Added {i_qty} x {item_name}")
 
-# --- LOGIC FUNCTIONS ---
+if st.sidebar.button("Clear List"):
+    st.session_state.items_to_pack = []
 
-def check_fit(box_dims, item_dims, pad):
+# --- MAIN PANEL: ITEM LIST ---
+st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
+if len(st.session_state.items_to_pack) > 0:
+    # Display a small summary of added items
+    st.dataframe(st.session_state.items_to_pack)
+else:
+    st.info("Add items from the sidebar to start.")
+
+# --- VISUALIZATION FUNCTIONS ---
+def get_cube_trace(x, y, z, l, w, h, color, name, opacity=1.0):
     """
-    Sorts dimensions to account for rotation.
-    Checks if Item dimensions + padding <= Box dimensions.
+    Draws a 3D cube using plotly mesh3d.
+    x, y, z: Bottom-left-front corner coordinates
+    l, w, h: Dimensions
     """
-    # Sort dimensions (Smallest to Largest) to simulate best rotation
-    sorted_box = sorted(box_dims)
-    sorted_item = sorted(item_dims)
-    
-    # Check if every dimension of the item fits within the box
-    fits = True
-    details = []
-    
-    for i, (b, it) in enumerate(zip(sorted_box, sorted_item)):
-        needed = it + (pad * 2) # Padding on both sides
-        if needed > b:
-            fits = False
-            details.append(f"Dimension mismatch: Item needs {needed:.2f} but Box is {b:.2f}")
-            
-    return fits, sorted_box, sorted_item, details
+    # 8 vertices of the cube
+    x_pts = [x, x+l, x+l, x, x, x+l, x+l, x]
+    y_pts = [y, y, y+w, y+w, y, y, y+w, y+w]
+    z_pts = [z, z, z, z, z+h, z+h, z+h, z+h]
 
-def get_cube_mesh(l, w, h, opacity=0.2, color='blue', name='Box'):
-    x, y, z = l/2, w/2, h/2
-    
-    # 8 vertices of a cube centered at 0,0,0
-    x_pts = [-x, -x, x, x, -x, -x, x, x]
-    y_pts = [-y, y, y, -y, -y, y, y, -y]
-    z_pts = [-z, -z, -z, -z, z, z, z, z]
-    
     return go.Mesh3d(
         x=x_pts, y=y_pts, z=z_pts,
         i=[7, 0, 0, 0, 4, 4, 6, 6, 4, 0, 3, 2],
@@ -64,82 +70,97 @@ def get_cube_mesh(l, w, h, opacity=0.2, color='blue', name='Box'):
         opacity=opacity,
         color=color,
         name=name,
-        showscale=False
+        showscale=False,
+        hoverinfo='name'
     )
 
-def get_wireframe(l, w, h, color='black'):
-    x, y, z = l/2, w/2, h/2
-    # Define lines for the 12 edges of the box
-    x_lines = [-x, -x, x, x, -x, -x, x, x, -x, -x, x, x, -x, x, x, -x]
-    y_lines = [-y, y, y, -y, -y, y, y, -y, -y, -y, -y, -y, y, y, y, y]
-    z_lines = [-z, -z, -z, -z, z, z, z, z, -z, z, z, -z, -z, z, z, -z]
-    
-    # Manually constructing line segments (Plotly Scatter3d is easier for lines)
-    # A simpler way is plotting lines between corners
+def get_wireframe(l, w, h):
+    # Simple wireframe for the container box
     pts = [
-        (-x, -y, -z), (x, -y, -z), (x, y, -z), (-x, y, -z), (-x, -y, -z), # Bottom square
-        (-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z), (-x, -y, z),      # Top square
-        (-x, -y, z), (-x, -y, -z),                                        # Connect verticals
-        (x, -y, z), (x, -y, -z),
-        (x, y, z), (x, y, -z),
-        (-x, y, z), (-x, y, -z)
+        (0,0,0), (l,0,0), (l,w,0), (0,w,0), (0,0,0), # Bottom
+        (0,0,h), (l,0,h), (l,w,h), (0,w,h), (0,0,h), # Top
+        (0,0,h), (0,0,0), (l,0,0), (l,0,h),          # Verticals
+        (l,w,h), (l,w,0), (0,w,0), (0,w,h)
     ]
-    
-    X, Y, Z = [], [], []
-    for p in pts:
-        X.append(p[0])
-        Y.append(p[1])
-        Z.append(p[2])
-        
-    return go.Scatter3d(x=X, y=Y, z=Z, mode='lines', line=dict(color=color, width=4), name='Frame')
+    X = [p[0] for p in pts]
+    Y = [p[1] for p in pts]
+    Z = [p[2] for p in pts]
+    return go.Scatter3d(x=X, y=Y, z=Z, mode='lines', line=dict(color='black', width=4), name='Bin Frame')
 
-# --- MAIN APP LOGIC ---
-
-# 1. Run Calculation
-box_dims_raw = [box_l, box_w, box_h]
-item_dims_raw = [item_l, item_w, item_h]
-
-fits, s_box, s_item, issues = check_fit(box_dims_raw, item_dims_raw, padding)
-
-# 2. Display Status
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.subheader("Result")
-    if fits:
-        st.success("✅ IT FITS!")
-        st.metric("Volume Efficiency", f"{((s_item[0]*s_item[1]*s_item[2]) / (s_box[0]*s_box[1]*s_box[2]) * 100):.1f}%")
+# --- CALCULATION LOGIC ---
+if st.button("Calculate Packing", type="primary"):
+    if not st.session_state.items_to_pack:
+        st.warning("Please add items first.")
     else:
-        st.error("❌ DOES NOT FIT")
-        for issue in issues:
-            st.write(f"- {issue}")
+        # 1. Init Packer
+        packer = Packer()
+        
+        # 2. Add Bin (Container)
+        # Name, W, H, D, Max Weight. 
+        # Note: py3dbp uses (W, H, D) order usually, but we map L->W, W->H, H->D for consistency
+        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, max_weight))
 
-    st.markdown("---")
-    st.write("**Optimized Dimensions used for Calculation:**")
-    st.write(f"Box: {s_box[0]} x {s_box[1]} x {s_box[2]}")
-    st.write(f"Item: {s_item[0]} x {s_item[1]} x {s_item[2]}")
+        # 3. Add Items
+        # We assign the color as a property to retrieve later
+        for i, item in enumerate(st.session_state.items_to_pack):
+            # Item(name, width, height, depth, weight)
+            # We use a dummy weight of 1 since user didn't input weights per item
+            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
+            p_item.color = item['color'] 
+            packer.add_item(p_item)
 
-# 3. 3D Visualization
-with col2:
-    layout = go.Layout(
-        scene=dict(
-            xaxis=dict(title='Length', range=[-max(s_box), max(s_box)]),
-            yaxis=dict(title='Width', range=[-max(s_box), max(s_box)]),
-            zaxis=dict(title='Height', range=[-max(s_box), max(s_box)]),
-            aspectmode='data'
-        ),
-        margin=dict(l=0, r=0, b=0, t=0),
-        height=500
-    )
-    
-    fig = go.Figure(layout=layout)
-    
-    # Draw Box (Wireframe + Light Mesh) - Use Sorted Dims to show the fit visually
-    fig.add_trace(get_cube_mesh(s_box[0], s_box[1], s_box[2], opacity=0.1, color='grey', name='Box Volume'))
-    fig.add_trace(get_wireframe(s_box[0], s_box[1], s_box[2], color='black'))
-    
-    # Draw Item (Solid Mesh) - Center it
-    item_color = '#00CC96' if fits else '#EF553B'
-    fig.add_trace(get_cube_mesh(s_item[0], s_item[1], s_item[2], opacity=1.0, color=item_color, name='Item'))
+        # 4. Run Packing
+        packer.pack()
 
-    st.plotly_chart(fig, use_container_width=True)
+        # 5. Process Results
+        box = packer.bins[0] # We only have one bin
+        
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            st.subheader("Results")
+            if len(box.unfitted_items) == 0:
+                st.success("✅ All items fit!")
+            else:
+                st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
+            
+            st.metric("Packed Items", len(box.items))
+            st.metric("Volume Utilization", f"{box.get_volume() / (box_l*box_w*box_h) * 100:.1f}%")
+            
+            if box.unfitted_items:
+                st.warning("Items left behind:")
+                for item in box.unfitted_items:
+                    st.write(f"- {item.name}")
+
+        with col2:
+            # 6. Visualization
+            layout = go.Layout(
+                scene=dict(
+                    xaxis=dict(title='Length (x)', range=[0, box_l]),
+                    yaxis=dict(title='Width (y)', range=[0, box_w]),
+                    zaxis=dict(title='Height (z)', range=[0, box_h]),
+                    aspectmode='manual',
+                    aspectratio=dict(x=1, y=box_w/box_l, z=box_h/box_l)
+                ),
+                margin=dict(l=0, r=0, b=0, t=0),
+                height=600
+            )
+            
+            fig = go.Figure(layout=layout)
+            
+            # Draw Container Wireframe
+            fig.add_trace(get_wireframe(box_l, box_w, box_h))
+            
+            # Draw Packed Items
+            for item in box.items:
+                # item.position gives [x, y, z] (decimal)
+                # item.get_dimension() gives [w, h, d] (decimal) after rotation
+                x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
+                w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
+                
+                # Retrieve color we stored earlier (or default to gray)
+                color = getattr(item, 'color', 'gray')
+                
+                fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
+
+            st.plotly_chart(fig, use_container_width=True)
