@@ -167,7 +167,9 @@ if st.button("Calculate Packing", type="primary"):
             
             st.metric("Packed Items", len(box.items))
             st.metric("Volume Utilization", f"{efficiency:.1f}%")
-            st.caption(f"Used: {packed_vol:.2f} / Total: {total_box_volume:.2f}") # Total box volume variable fixed
+            
+            # FIX: Variable name corrected below
+            st.caption(f"Used: {packed_vol:.2f} / Total: {total_vol:.2f}") 
 
             if len(box.unfitted_items) == 0:
                 st.success("✅ All items fit!")
