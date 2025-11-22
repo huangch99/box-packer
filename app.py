@@ -5,6 +5,13 @@ import decimal
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
+
+# --- NOTIFICATION SYSTEM ---
+# Check if there is a message stored in the session from a previous action
+if 'notification' in st.session_state and st.session_state.notification:
+    st.toast(st.session_state.notification, icon="🔔")
+    st.session_state.notification = None # Clear it so it doesn't show again
+
 st.title("📦 Multi-Item Shipping Calculator")
 st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing.")
 
@@ -23,7 +30,6 @@ st.sidebar.markdown("---")
 st.sidebar.header("2. Add Items")
 item_name = st.sidebar.text_input("Item Name", value="Product A")
 
-# Simple inputs (Swap button removed from here as requested)
 c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", min_value=0.1, value=5.0)
 i_w = c2.number_input("W", min_value=0.1, value=5.0)
@@ -41,10 +47,14 @@ if st.sidebar.button("Add Item to List"):
             "h": i_h,
             "color": i_color
         })
-    st.success(f"Added {i_qty} x {item_name}")
+    # Set notification and reload to show it
+    st.session_state.notification = f"✅ Added {i_qty} x {item_name}"
+    st.rerun()
 
 if st.sidebar.button("Clear Entire List"):
     st.session_state.items_to_pack = []
+    st.session_state.notification = "🧹 List Cleared"
+    st.rerun()
 
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
@@ -75,12 +85,16 @@ if len(st.session_state.items_to_pack) > 0:
             if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
                 st.session_state.items_to_pack[i]['w'], st.session_state.items_to_pack[i]['h'] = \
                 st.session_state.items_to_pack[i]['h'], st.session_state.items_to_pack[i]['w']
+                st.session_state.notification = f"🔄 Swapped dimensions for {item['name']}"
                 st.rerun()
         
         # DELETE BUTTON
         with c6:
             if st.button("🗑️", key=f"remove_{i}", help="Remove this item"):
+                removed_name = st.session_state.items_to_pack[i]['name']
                 st.session_state.items_to_pack.pop(i)
+                # Set notification and reload
+                st.session_state.notification = f"🗑️ Removed {removed_name}"
                 st.rerun()
 else:
     st.info("Add items from the sidebar to start.")
@@ -129,9 +143,6 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         st.warning("Please add items first.")
     else:
         # --- STEP 1: SORT ITEMS BY VOLUME (DESCENDING) ---
-        # Optimization Strategy: "Big Rocks First"
-        # We sort the list so the algorithm places larger items first.
-        # This prevents small items from fragmenting the space needed for big ones.
         sorted_items = sorted(
             st.session_state.items_to_pack, 
             key=lambda x: x['l'] * x['w'] * x['h'], 
@@ -139,18 +150,15 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         )
         
         packer = Packer()
-        IGNORED_WEIGHT_LIMIT = 999999999 # Effectively disable weight checking
+        IGNORED_WEIGHT_LIMIT = 999999999 
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(sorted_items):
-            # Create the Item object. We set weight to 1 as a dummy value.
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
         # --- STEP 2: RUN ALGORITHM ---
-        # The 'packer.pack()' method tries to fit items into the bin
-        # based on available pivot points (corners) in the 3D space.
         packer.pack()
         box = packer.bins[0]
         
@@ -160,14 +168,10 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
             st.subheader("Results")
             
             # --- STEP 3: CALCULATE VOLUME MANUALLY ---
-            # We do this manually because the library's internal volume tracking
-            # can be confusing. We strictly sum L*W*H of items inside.
-            
             total_box_volume = box_l * box_w * box_h
             packed_item_volume = 0
             
             for item in box.items:
-                 # Sum volume of every item that successfully fit
                  packed_item_volume += float(item.width) * float(item.height) * float(item.depth)
 
             efficiency = (packed_item_volume / total_box_volume) * 100
@@ -201,7 +205,7 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
                 color = getattr(item, 'color', 'gray')
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
-            # Draw Unfitted Items (Stacked Outside)
+            # Draw Unfitted Items
             if len(box.unfitted_items) > 0:
                 gap = box_l * 0.1
                 start_x = box_l + gap
