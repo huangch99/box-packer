@@ -6,7 +6,7 @@ import decimal
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
 st.title("📦 Multi-Item Shipping Calculator")
-st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing to optimize space.")
+st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
@@ -38,14 +38,42 @@ if st.sidebar.button("Add Item to List"):
         })
     st.success(f"Added {i_qty} x {item_name}")
 
-if st.sidebar.button("Clear List"):
+if st.sidebar.button("Clear Entire List"):
     st.session_state.items_to_pack = []
 
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
+
 if len(st.session_state.items_to_pack) > 0:
-    # Show the list, but note that calculation will sort them later
-    st.dataframe(st.session_state.items_to_pack)
+    # Create a header row
+    h1, h2, h3, h4, h5 = st.columns([1, 3, 2, 1, 1])
+    h1.markdown("**No.**")
+    h2.markdown("**Name**")
+    h3.markdown("**Dims (LxWxH)**")
+    h4.markdown("**Color**")
+    h5.markdown("**Remove**")
+    
+    st.markdown("---")
+
+    # Loop through items and display them with a delete button
+    # We enumerate so we have the index 'i' to delete the specific item
+    for i, item in enumerate(st.session_state.items_to_pack):
+        c1, c2, c3, c4, c5 = st.columns([1, 3, 2, 1, 1])
+        
+        with c1:
+            st.write(f"#{i+1}")
+        with c2:
+            st.write(item['name'])
+        with c3:
+            st.write(f"{item['l']} x {item['w']} x {item['h']}")
+        with c4:
+            # Show a small color block
+            st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
+        with c5:
+            # The Delete Button
+            if st.button("🗑️", key=f"remove_{i}"):
+                st.session_state.items_to_pack.pop(i)
+                st.rerun() # Immediately refresh the app to show the item is gone
 else:
     st.info("Add items from the sidebar to start.")
 
@@ -81,9 +109,6 @@ def get_wireframe(l, w, h):
 
 # --- HELPER: ANALYZE FAILURE REASON ---
 def analyze_failure(bin_obj, item_obj):
-    """
-    Determines why an item failed to pack based on geometry only.
-    """
     bin_dims = sorted([float(bin_obj.width), float(bin_obj.height), float(bin_obj.depth)])
     item_dims = sorted([float(item_obj.width), float(item_obj.height), float(item_obj.depth)])
     
@@ -97,7 +122,6 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         st.warning("Please add items first.")
     else:
         # --- STEP 1: SORT ITEMS BY VOLUME (DESCENDING) ---
-        # We sort the session list temporarily for this calculation
         sorted_items = sorted(
             st.session_state.items_to_pack, 
             key=lambda x: x['l'] * x['w'] * x['h'], 
@@ -108,13 +132,11 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         IGNORED_WEIGHT_LIMIT = 999999999 
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
-        # Add items in the new sorted order
         for i, item in enumerate(sorted_items):
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
-        # Pack
         packer.pack()
         box = packer.bins[0]
         
