@@ -5,19 +5,18 @@ import decimal
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
-
-# --- NOTIFICATION SYSTEM ---
-# Check if there is a message stored in the session from a previous action
-if 'notification' in st.session_state and st.session_state.notification:
-    st.toast(st.session_state.notification, icon="🔔")
-    st.session_state.notification = None # Clear it so it doesn't show again
-
 st.title("📦 Multi-Item Shipping Calculator")
 st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
+
+# Initialize a variable to hold our status messages
+if 'status_msg' not in st.session_state:
+    st.session_state.status_msg = ""
+if 'status_type' not in st.session_state:
+    st.session_state.status_type = "" # 'success' or 'error'
 
 # --- SIDEBAR: CONFIGURATION ---
 st.sidebar.header("1. Define Box (Inner Dims)")
@@ -38,6 +37,7 @@ i_h = c3.number_input("H", min_value=0.1, value=5.0)
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
+# --- ACTION: ADD ITEM ---
 if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
         st.session_state.items_to_pack.append({
@@ -47,17 +47,34 @@ if st.sidebar.button("Add Item to List"):
             "h": i_h,
             "color": i_color
         })
-    # Set notification and reload to show it
-    st.session_state.notification = f"✅ Added {i_qty} x {item_name}"
+    # Set the message and type, then reload
+    st.session_state.status_msg = f"✅ Successfully added {i_qty} x {item_name}"
+    st.session_state.status_type = "success"
     st.rerun()
 
+# --- ACTION: CLEAR LIST ---
 if st.sidebar.button("Clear Entire List"):
     st.session_state.items_to_pack = []
-    st.session_state.notification = "🧹 List Cleared"
+    st.session_state.status_msg = "🧹 List cleared successfully"
+    st.session_state.status_type = "info"
     st.rerun()
 
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
+
+# --- NOTIFICATION DISPLAY ---
+# This block checks if a message exists from the previous action and displays it
+if st.session_state.status_msg:
+    if st.session_state.status_type == "success":
+        st.success(st.session_state.status_msg)
+    elif st.session_state.status_type == "error":
+        st.error(st.session_state.status_msg)
+    else:
+        st.info(st.session_state.status_msg)
+    
+    # Clear the message so it doesn't persist on next unrelated reload
+    st.session_state.status_msg = ""
+    st.session_state.status_type = ""
 
 if len(st.session_state.items_to_pack) > 0:
     # Header Row
@@ -85,7 +102,9 @@ if len(st.session_state.items_to_pack) > 0:
             if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
                 st.session_state.items_to_pack[i]['w'], st.session_state.items_to_pack[i]['h'] = \
                 st.session_state.items_to_pack[i]['h'], st.session_state.items_to_pack[i]['w']
-                st.session_state.notification = f"🔄 Swapped dimensions for {item['name']}"
+                
+                st.session_state.status_msg = f"🔄 Swapped dimensions for {item['name']}"
+                st.session_state.status_type = "info"
                 st.rerun()
         
         # DELETE BUTTON
@@ -93,8 +112,10 @@ if len(st.session_state.items_to_pack) > 0:
             if st.button("🗑️", key=f"remove_{i}", help="Remove this item"):
                 removed_name = st.session_state.items_to_pack[i]['name']
                 st.session_state.items_to_pack.pop(i)
-                # Set notification and reload
-                st.session_state.notification = f"🗑️ Removed {removed_name}"
+                
+                # Set the message and type, then reload
+                st.session_state.status_msg = f"❌ Removed {removed_name} from list"
+                st.session_state.status_type = "error"
                 st.rerun()
 else:
     st.info("Add items from the sidebar to start.")
