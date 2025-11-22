@@ -1,6 +1,7 @@
 import streamlit as st
 import plotly.graph_objects as go
 from py3dbp import Packer, Bin, Item
+import decimal
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
@@ -25,6 +26,8 @@ c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", value=5.0)
 i_w = c2.number_input("W", value=5.0)
 i_h = c3.number_input("H", value=5.0)
+# Adding Weight input per item so the weight calculation is real
+i_weight = st.sidebar.number_input("Weight (per item)", value=1.0, min_value=0.1)
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
@@ -32,7 +35,7 @@ if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
         st.session_state.items_to_pack.append({
             "name": item_name,
-            "l": i_l, "w": i_w, "h": i_h,
+            "l": i_l, "w": i_w, "h": i_h, "weight": i_weight,
             "color": i_color
         })
     st.success(f"Added {i_qty} x {item_name}")
@@ -77,6 +80,30 @@ def get_wireframe(l, w, h):
     Z = [p[2] for p in pts]
     return go.Scatter3d(x=X, y=Y, z=Z, mode='lines', line=dict(color='black', width=4), name='Bin Frame')
 
+# --- HELPER: ANALYZE FAILURE REASON ---
+def analyze_failure(bin_obj, item_obj):
+    """
+    Determines why an item failed to pack.
+    """
+    # 1. Check Dimensions (Does it fit in an empty box?)
+    # Sort dimensions to account for rotation
+    bin_dims = sorted([float(bin_obj.width), float(bin_obj.height), float(bin_obj.depth)])
+    item_dims = sorted([float(item_obj.width), float(item_obj.height), float(item_obj.depth)])
+    
+    if any(i > b for i, b in zip(item_dims, bin_dims)):
+        return "❌ Item is too large for box (Dimensions mismatch)"
+
+    # 2. Check Weight (Did we hit the max weight?)
+    current_packed_weight = sum(float(i.weight) for i in bin_obj.items)
+    item_weight = float(item_obj.weight)
+    max_weight = float(bin_obj.max_weight)
+    
+    if current_packed_weight + item_weight > max_weight:
+        return "⚖️ Exceeds Max Weight limit"
+
+    # 3. If it fits dimensions and weight, it must be space
+    return "📦 Not enough remaining space (or fragmentation)"
+
 # --- CALCULATION LOGIC ---
 if st.button("Calculate Packing", type="primary"):
     if not st.session_state.items_to_pack:
@@ -86,7 +113,7 @@ if st.button("Calculate Packing", type="primary"):
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, max_weight))
 
         for i, item in enumerate(st.session_state.items_to_pack):
-            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
+            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], item['weight'])
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
@@ -98,24 +125,28 @@ if st.button("Calculate Packing", type="primary"):
         
         with col1:
             st.subheader("Results")
+            
+            # Stats
+            total_volume = box_l * box_w * box_h
+            used_volume = float(box.get_volume())
+            efficiency = (used_volume / total_volume) * 100
+            
+            st.metric("Packed Items", len(box.items))
+            st.metric("Volume Utilization", f"{efficiency:.1f}%")
+            st.metric("Total Weight", f"{float(box.get_total_weight()):.2f} / {max_weight}")
+
+            # Success Check
             if len(box.unfitted_items) == 0:
                 st.success("✅ All items fit!")
             else:
                 st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
-            
-            st.metric("Packed Items", len(box.items))
-            
-            # --- FIX START: Convert Decimal to Float ---
-            total_volume = box_l * box_w * box_h
-            used_volume = float(box.get_volume()) # Converted to float here
-            efficiency = (used_volume / total_volume) * 100
-            st.metric("Volume Utilization", f"{efficiency:.1f}%")
-            # --- FIX END ---
-            
-            if box.unfitted_items:
-                st.warning("Items left behind:")
+                st.markdown("### Failed Items Analysis:")
+                
                 for item in box.unfitted_items:
-                    st.write(f"- {item.name}")
+                    reason = analyze_failure(box, item)
+                    with st.expander(f"{item.name} (Failed)", expanded=True):
+                        st.write(f"**Reason:** {reason}")
+                        st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)} | Wgt: {float(item.weight)}")
 
         with col2:
             layout = go.Layout(
