@@ -6,7 +6,7 @@ import decimal
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
 st.title("📦 Multi-Item Shipping Calculator")
-st.markdown("**Logic:** Uses the `py3dbp` algorithm to stack multiple items (Tetris-style) into a single box.")
+st.markdown("**Logic:** Uses the `py3dbp` algorithm to stack multiple items (Tetris-style) into a single box based on **Dimensions Only**.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
@@ -17,7 +17,7 @@ st.sidebar.header("1. Define Box (Inner Dims)")
 box_l = st.sidebar.number_input("Box Length", value=12.0)
 box_w = st.sidebar.number_input("Box Width", value=12.0)
 box_h = st.sidebar.number_input("Box Height", value=12.0)
-max_weight = st.sidebar.number_input("Max Weight Capacity", value=50.0)
+# Weight input removed. Internally we set this to infinity.
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Add Items")
@@ -26,7 +26,7 @@ c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", value=5.0)
 i_w = c2.number_input("W", value=5.0)
 i_h = c3.number_input("H", value=5.0)
-i_weight = st.sidebar.number_input("Weight (per item)", value=1.0, min_value=0.1)
+# Item weight input removed.
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
@@ -34,7 +34,7 @@ if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
         st.session_state.items_to_pack.append({
             "name": item_name,
-            "l": i_l, "w": i_w, "h": i_h, "weight": i_weight,
+            "l": i_l, "w": i_w, "h": i_h,
             "color": i_color
         })
     st.success(f"Added {i_qty} x {item_name}")
@@ -82,7 +82,7 @@ def get_wireframe(l, w, h):
 # --- HELPER: ANALYZE FAILURE REASON ---
 def analyze_failure(bin_obj, item_obj):
     """
-    Determines why an item failed to pack.
+    Determines why an item failed to pack based on geometry only.
     """
     # 1. Check Dimensions
     bin_dims = sorted([float(bin_obj.width), float(bin_obj.height), float(bin_obj.depth)])
@@ -91,15 +91,7 @@ def analyze_failure(bin_obj, item_obj):
     if any(i > b for i, b in zip(item_dims, bin_dims)):
         return "❌ Item is too large for box (Dimensions mismatch)"
 
-    # 2. Check Weight
-    current_packed_weight = sum(float(i.weight) for i in bin_obj.items)
-    item_weight = float(item_obj.weight)
-    max_weight = float(bin_obj.max_weight)
-    
-    if current_packed_weight + item_weight > max_weight:
-        return "⚖️ Exceeds Max Weight limit"
-
-    # 3. Space
+    # 2. Space (Since weight is ignored)
     return "📦 Not enough remaining space (or fragmentation)"
 
 # --- CALCULATION LOGIC ---
@@ -108,12 +100,13 @@ if st.button("Calculate Packing", type="primary"):
         st.warning("Please add items first.")
     else:
         packer = Packer()
-        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, max_weight))
+        # We set max weight to a huge number so it is effectively ignored
+        IGNORED_WEIGHT_LIMIT = 999999999 
+        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(st.session_state.items_to_pack):
-            # FIX: Use .get() to handle cases where 'weight' might be missing from old session data
-            wgt = item.get('weight', 1.0) 
-            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], wgt)
+            # We give every item a dummy weight of 1. It doesn't matter because limit is infinity.
+            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
@@ -133,7 +126,6 @@ if st.button("Calculate Packing", type="primary"):
             
             st.metric("Packed Items", len(box.items))
             st.metric("Volume Utilization", f"{efficiency:.1f}%")
-            st.metric("Total Weight", f"{float(box.get_total_weight()):.2f} / {max_weight}")
 
             # Success Check
             if len(box.unfitted_items) == 0:
@@ -146,7 +138,7 @@ if st.button("Calculate Packing", type="primary"):
                     reason = analyze_failure(box, item)
                     with st.expander(f"{item.name} (Failed)", expanded=True):
                         st.write(f"**Reason:** {reason}")
-                        st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)} | Wgt: {float(item.weight)}")
+                        st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
 
         with col2:
             layout = go.Layout(
