@@ -24,7 +24,6 @@ st.sidebar.header("2. Add Items")
 item_name = st.sidebar.text_input("Item Name", value="Product A")
 
 c1, c2, c3 = st.sidebar.columns(3)
-# Removed session state keys and swap logic from here
 i_l = c1.number_input("L", min_value=0.1, value=5.0)
 i_w = c2.number_input("W", min_value=0.1, value=5.0)
 i_h = c3.number_input("H", min_value=0.1, value=5.0)
@@ -34,7 +33,6 @@ i_color = st.sidebar.color_picker("Color", "#00CC96")
 
 if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
-        # We use the direct variables (i_l, i_w, i_h) now
         st.session_state.items_to_pack.append({
             "name": item_name,
             "l": i_l, 
@@ -52,7 +50,6 @@ st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 
 if len(st.session_state.items_to_pack) > 0:
     # Header Row
-    # Columns: [ID, Name, Dims, Color, SwapBtn, DelBtn]
     c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2.5, 2, 1, 0.5, 0.5])
     c1.markdown("**No.**")
     c2.markdown("**Name**")
@@ -72,10 +69,9 @@ if len(st.session_state.items_to_pack) > 0:
         with c3: st.write(f"{item['l']} x {item['w']} x {item['h']}")
         with c4: st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
         
-        # SWAP BUTTON (In List)
+        # SWAP BUTTON
         with c5:
             if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
-                # Swap logic
                 st.session_state.items_to_pack[i]['w'], st.session_state.items_to_pack[i]['h'] = \
                 st.session_state.items_to_pack[i]['h'], st.session_state.items_to_pack[i]['w']
                 st.rerun()
@@ -156,12 +152,21 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         with col1:
             st.subheader("Results")
             
-            total_volume = box_l * box_w * box_h
-            used_volume = float(box.get_volume())
-            efficiency = (used_volume / total_volume) * 100
+            # --- MANUAL VOLUME CALCULATION ---
+            total_box_volume = box_l * box_w * box_h
+            
+            # Iterate through packed items and sum (L * W * H)
+            packed_item_volume = 0
+            for item in box.items:
+                 # py3dbp returns decimals, so we convert to float for the sum
+                 packed_item_volume += float(item.width) * float(item.height) * float(item.depth)
+
+            efficiency = (packed_item_volume / total_box_volume) * 100
             
             st.metric("Packed Items", len(box.items))
             st.metric("Volume Utilization", f"{efficiency:.1f}%")
+            # Optional: Show the raw numbers
+            st.caption(f"Used: {packed_item_volume:.2f} / Total: {total_box_volume:.2f}")
 
             if len(box.unfitted_items) == 0:
                 st.success("✅ All items fit!")
