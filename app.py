@@ -12,7 +12,6 @@ st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to S
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
 
-# Initialize notification states
 if 'status_msg' not in st.session_state:
     st.session_state.status_msg = ""
 if 'status_type' not in st.session_state:
@@ -47,7 +46,6 @@ if st.sidebar.button("Add Item to List"):
             "h": i_h,
             "color": i_color
         })
-    # Set notification and reload
     st.session_state.status_msg = f"✅ Successfully added {i_qty} x {item_name}"
     st.session_state.status_type = "success"
     st.rerun()
@@ -62,7 +60,6 @@ if st.sidebar.button("Clear Entire List"):
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 
-# Display Notification if exists
 if st.session_state.status_msg:
     if st.session_state.status_type == "success":
         st.success(st.session_state.status_msg)
@@ -70,12 +67,10 @@ if st.session_state.status_msg:
         st.error(st.session_state.status_msg)
     else:
         st.info(st.session_state.status_msg)
-    # Clear message
     st.session_state.status_msg = ""
     st.session_state.status_type = ""
 
 if len(st.session_state.items_to_pack) > 0:
-    # Header Row
     c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2.5, 2, 1, 0.5, 0.5])
     c1.markdown("**No.**")
     c2.markdown("**Name**")
@@ -86,7 +81,6 @@ if len(st.session_state.items_to_pack) > 0:
     
     st.markdown("---")
 
-    # Loop through items
     for i, item in enumerate(st.session_state.items_to_pack):
         c1, c2, c3, c4, c5, c6 = st.columns([0.5, 2.5, 2, 1, 0.5, 0.5])
         
@@ -95,22 +89,18 @@ if len(st.session_state.items_to_pack) > 0:
         with c3: st.write(f"{item['l']} x {item['w']} x {item['h']}")
         with c4: st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
         
-        # SWAP BUTTON (In List)
         with c5:
-            if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
+            if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height"):
                 st.session_state.items_to_pack[i]['w'], st.session_state.items_to_pack[i]['h'] = \
                 st.session_state.items_to_pack[i]['h'], st.session_state.items_to_pack[i]['w']
-                
                 st.session_state.status_msg = f"🔄 Swapped dimensions for {item['name']}"
                 st.session_state.status_type = "info"
                 st.rerun()
         
-        # DELETE BUTTON
         with c6:
             if st.button("🗑️", key=f"remove_{i}", help="Remove this item"):
                 removed_name = st.session_state.items_to_pack[i]['name']
                 st.session_state.items_to_pack.pop(i)
-                
                 st.session_state.status_msg = f"❌ Removed {removed_name} from list"
                 st.session_state.status_type = "error"
                 st.rerun()
@@ -156,13 +146,11 @@ def analyze_failure(bin_obj, item_obj):
     return "📦 Not enough remaining space (or fragmentation)"
 
 # --- CALCULATION LOGIC ---
-if st.button("Calculate Packing", type="primary"):
+if st.button("Calculate Packing (Largest First)", type="primary"):
     if not st.session_state.items_to_pack:
         st.warning("Please add items first.")
     else:
-        # --- STEP 1: SORT ITEMS BY VOLUME (DESCENDING) ---
-        # We sort the list so the algorithm places larger items first.
-        # This corresponds to the "Big Rocks First" optimization strategy.
+        # Sort items (Backup sorting)
         sorted_items = sorted(
             st.session_state.items_to_pack, 
             key=lambda x: x['l'] * x['w'] * x['h'], 
@@ -170,7 +158,7 @@ if st.button("Calculate Packing", type="primary"):
         )
         
         packer = Packer()
-        IGNORED_WEIGHT_LIMIT = 999999999 # Infinite weight
+        IGNORED_WEIGHT_LIMIT = 999999999 
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(sorted_items):
@@ -178,8 +166,12 @@ if st.button("Calculate Packing", type="primary"):
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
-        # --- STEP 2: RUN ALGORITHM ---
-        packer.pack()
+        # --- UPDATED PACK COMMAND ---
+        # 'fill=both' is not valid in py3dbp. 
+        # We use bigger_first=True (standard filling strategy) 
+        # and distribute_items=False (fill one bin completely).
+        packer.pack(bigger_first=True, distribute_items=False)
+        
         box = packer.bins[0]
         
         col1, col2 = st.columns([1, 3])
@@ -187,7 +179,6 @@ if st.button("Calculate Packing", type="primary"):
         with col1:
             st.subheader("Results")
             
-            # --- STEP 3: CALCULATE VOLUME MANUALLY ---
             total_box_volume = box_l * box_w * box_h
             packed_item_volume = 0
             
@@ -215,17 +206,14 @@ if st.button("Calculate Packing", type="primary"):
             max_x_draw = box_l
             fig = go.Figure()
             
-            # Draw Wireframe
             fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
-            # Draw Packed Items
             for item in box.items:
                 x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
                 w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
                 color = getattr(item, 'color', 'gray')
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
-            # Draw Unfitted Items
             if len(box.unfitted_items) > 0:
                 gap = box_l * 0.1
                 start_x = box_l + gap
