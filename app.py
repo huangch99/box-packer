@@ -26,7 +26,6 @@ c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", value=5.0)
 i_w = c2.number_input("W", value=5.0)
 i_h = c3.number_input("H", value=5.0)
-# Adding Weight input per item so the weight calculation is real
 i_weight = st.sidebar.number_input("Weight (per item)", value=1.0, min_value=0.1)
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
@@ -85,15 +84,14 @@ def analyze_failure(bin_obj, item_obj):
     """
     Determines why an item failed to pack.
     """
-    # 1. Check Dimensions (Does it fit in an empty box?)
-    # Sort dimensions to account for rotation
+    # 1. Check Dimensions
     bin_dims = sorted([float(bin_obj.width), float(bin_obj.height), float(bin_obj.depth)])
     item_dims = sorted([float(item_obj.width), float(item_obj.height), float(item_obj.depth)])
     
     if any(i > b for i, b in zip(item_dims, bin_dims)):
         return "❌ Item is too large for box (Dimensions mismatch)"
 
-    # 2. Check Weight (Did we hit the max weight?)
+    # 2. Check Weight
     current_packed_weight = sum(float(i.weight) for i in bin_obj.items)
     item_weight = float(item_obj.weight)
     max_weight = float(bin_obj.max_weight)
@@ -101,7 +99,7 @@ def analyze_failure(bin_obj, item_obj):
     if current_packed_weight + item_weight > max_weight:
         return "⚖️ Exceeds Max Weight limit"
 
-    # 3. If it fits dimensions and weight, it must be space
+    # 3. Space
     return "📦 Not enough remaining space (or fragmentation)"
 
 # --- CALCULATION LOGIC ---
@@ -113,7 +111,9 @@ if st.button("Calculate Packing", type="primary"):
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, max_weight))
 
         for i, item in enumerate(st.session_state.items_to_pack):
-            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], item['weight'])
+            # FIX: Use .get() to handle cases where 'weight' might be missing from old session data
+            wgt = item.get('weight', 1.0) 
+            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], wgt)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
