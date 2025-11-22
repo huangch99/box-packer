@@ -12,46 +12,49 @@ st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to S
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
 
-# Initialize Box Dims in Session State if not present (for the swap to work)
-if 'box_l' not in st.session_state: st.session_state.box_l = 12.0
-if 'box_w' not in st.session_state: st.session_state.box_w = 8.0
-if 'box_h' not in st.session_state: st.session_state.box_h = 6.0
+# Initialize Item Dims in Session State for the Swap to work
+if 'item_l' not in st.session_state: st.session_state.item_l = 5.0
+if 'item_w' not in st.session_state: st.session_state.item_w = 5.0
+if 'item_h' not in st.session_state: st.session_state.item_h = 5.0
 
 # --- CALLBACKS ---
-def swap_dims():
-    """Swaps Width and Height values in session state"""
-    temp = st.session_state.box_w
-    st.session_state.box_w = st.session_state.box_h
-    st.session_state.box_h = temp
+def swap_item_dims():
+    """Swaps Item Width and Height values in the input form"""
+    temp = st.session_state.item_w
+    st.session_state.item_w = st.session_state.item_h
+    st.session_state.item_h = temp
 
 # --- SIDEBAR: CONFIGURATION ---
 st.sidebar.header("1. Define Box (Inner Dims)")
-
-# We use the 'key' argument so we can modify these values programmatically via the Swap button
-box_l = st.sidebar.number_input("Box Length", min_value=0.1, key='box_l')
-box_w = st.sidebar.number_input("Box Width", min_value=0.1, key='box_w')
-box_h = st.sidebar.number_input("Box Height", min_value=0.1, key='box_h')
-
-# The Swap Button
-st.sidebar.button("🔄 Swap Width ↔ Height", on_click=swap_dims, help="Click to switch Width and Height dimensions")
-
+box_l = st.sidebar.number_input("Box Length", min_value=0.1, value=12.0)
+box_w = st.sidebar.number_input("Box Width", min_value=0.1, value=12.0)
+box_h = st.sidebar.number_input("Box Height", min_value=0.1, value=12.0)
 st.sidebar.caption("Weight capacity is disabled (Calculates by Size only)")
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Add Items")
 item_name = st.sidebar.text_input("Item Name", value="Product A")
+
 c1, c2, c3 = st.sidebar.columns(3)
-i_l = c1.number_input("L", value=5.0)
-i_w = c2.number_input("W", value=5.0)
-i_h = c3.number_input("H", value=5.0)
+# Added keys to these inputs so we can swap them programmatically
+i_l = c1.number_input("L", min_value=0.1, key='item_l')
+i_w = c2.number_input("W", min_value=0.1, key='item_w')
+i_h = c3.number_input("H", min_value=0.1, key='item_h')
+
+# THE SWAP BUTTON FOR ITEMS
+st.sidebar.button("🔄 Swap Item W ↔ H", on_click=swap_item_dims, help="Click to switch Width and Height for the item above")
+
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
 if st.sidebar.button("Add Item to List"):
     for _ in range(int(i_qty)):
+        # Use the session state values to ensure we get the swapped numbers if applicable
         st.session_state.items_to_pack.append({
             "name": item_name,
-            "l": i_l, "w": i_w, "h": i_h,
+            "l": st.session_state.item_l, 
+            "w": st.session_state.item_w, 
+            "h": st.session_state.item_h,
             "color": i_color
         })
     st.success(f"Added {i_qty} x {item_name}")
@@ -141,8 +144,7 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         
         packer = Packer()
         IGNORED_WEIGHT_LIMIT = 999999999 
-        # NOTE: We must use st.session_state values here because they are the 'live' values
-        packer.add_bin(Bin('MainBox', st.session_state.box_l, st.session_state.box_w, st.session_state.box_h, IGNORED_WEIGHT_LIMIT))
+        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(sorted_items):
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
@@ -157,7 +159,7 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         with col1:
             st.subheader("Results")
             
-            total_volume = st.session_state.box_l * st.session_state.box_w * st.session_state.box_h
+            total_volume = box_l * box_w * box_h
             used_volume = float(box.get_volume())
             efficiency = (used_volume / total_volume) * 100
             
@@ -177,11 +179,11 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
                         st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
 
         with col2:
-            max_x_draw = st.session_state.box_l
+            max_x_draw = box_l
             fig = go.Figure()
             
-            # Draw Wireframe using session_state dims
-            fig.add_trace(get_wireframe(st.session_state.box_l, st.session_state.box_w, st.session_state.box_h))
+            # Draw Wireframe
+            fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
             # Draw Packed Items
             for item in box.items:
@@ -192,8 +194,8 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
 
             # Draw Unfitted Items
             if len(box.unfitted_items) > 0:
-                gap = st.session_state.box_l * 0.1
-                start_x = st.session_state.box_l + gap
+                gap = box_l * 0.1
+                start_x = box_l + gap
                 current_z = 0
                 
                 for item in box.unfitted_items:
@@ -214,8 +216,8 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
             layout = go.Layout(
                 scene=dict(
                     xaxis=dict(title='Length (x)', range=[0, max_x_draw * 1.1]),
-                    yaxis=dict(title='Width (y)', range=[0, max(st.session_state.box_w, st.session_state.box_l)]),
-                    zaxis=dict(title='Height (z)', range=[0, max(st.session_state.box_h, st.session_state.box_l)]),
+                    yaxis=dict(title='Width (y)', range=[0, max(box_w, box_l)]),
+                    zaxis=dict(title='Height (z)', range=[0, max(box_h, box_l)]),
                     aspectmode='data'
                 ),
                 margin=dict(l=0, r=0, b=0, t=0),
