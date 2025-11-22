@@ -2,14 +2,11 @@ import streamlit as st
 import plotly.graph_objects as go
 from py3dbp import Packer, Bin, Item
 import decimal
-import copy # Needed to copy lists for multiple simulations
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
-st.title("📦 Multi-Item Shipping Calculator (Smart Mode)")
-st.markdown("""
-**Logic:** This tool now runs **3 Simulations** (Volume, Length, Area) and automatically displays the best result.
-""")
+st.title("📦 Multi-Item Shipping Calculator")
+st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to Smallest)** before packing.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
@@ -26,6 +23,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("2. Add Items")
 item_name = st.sidebar.text_input("Item Name", value="Product A")
 
+# Simple inputs (Swap button removed from here as requested)
 c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", min_value=0.1, value=5.0)
 i_w = c2.number_input("W", min_value=0.1, value=5.0)
@@ -72,12 +70,14 @@ if len(st.session_state.items_to_pack) > 0:
         with c3: st.write(f"{item['l']} x {item['w']} x {item['h']}")
         with c4: st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
         
+        # SWAP BUTTON (In List)
         with c5:
-            if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height"):
+            if st.button("🔄", key=f"swap_list_{i}", help="Swap Width and Height for this item"):
                 st.session_state.items_to_pack[i]['w'], st.session_state.items_to_pack[i]['h'] = \
                 st.session_state.items_to_pack[i]['h'], st.session_state.items_to_pack[i]['w']
                 st.rerun()
         
+        # DELETE BUTTON
         with c6:
             if st.button("🗑️", key=f"remove_{i}", help="Remove this item"):
                 st.session_state.items_to_pack.pop(i)
@@ -123,100 +123,66 @@ def analyze_failure(bin_obj, item_obj):
         return "❌ Item is too large for box (Dimensions mismatch)"
     return "📦 Not enough remaining space (or fragmentation)"
 
-# --- CORE PACKING ALGORITHM WRAPPER ---
-def run_packing_simulation(items, sort_key_func):
-    """
-    Runs a single packing simulation with a specific sorting strategy.
-    Returns: (packer_object, unfitted_count, packed_volume)
-    """
-    # 1. Sort items based on the provided key function (Strategy)
-    sorted_items = sorted(items, key=sort_key_func, reverse=True)
-    
-    # 2. Setup Packer
-    packer = Packer()
-    packer.add_bin(Bin('MainBox', box_l, box_w, box_h, 999999999)) # Infinite weight
-    
-    # 3. Add Items
-    for i, item in enumerate(sorted_items):
-        p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
-        p_item.color = item['color']
-        packer.add_item(p_item)
-        
-    # 4. Run
-    packer.pack()
-    box = packer.bins[0]
-    
-    # 5. Calculate stats to decide if this is the "Winner"
-    unfitted_count = len(box.unfitted_items)
-    
-    packed_volume = 0.0
-    for item in box.items:
-        packed_volume += float(item.width) * float(item.height) * float(item.depth)
-        
-    return packer, unfitted_count, packed_volume
-
 # --- CALCULATION LOGIC ---
-if st.button("Calculate Packing (Auto-Optimize)", type="primary"):
+if st.button("Calculate Packing (Largest First)", type="primary"):
     if not st.session_state.items_to_pack:
         st.warning("Please add items first.")
     else:
-        # --- RUN 3 PARALLEL STRATEGIES ---
-        
-        # Strategy A: Volume (L*W*H) - Standard
-        pack_A, fail_A, vol_A = run_packing_simulation(
+        # --- STEP 1: SORT ITEMS BY VOLUME (DESCENDING) ---
+        # Optimization Strategy: "Big Rocks First"
+        # We sort the list so the algorithm places larger items first.
+        # This prevents small items from fragmenting the space needed for big ones.
+        sorted_items = sorted(
             st.session_state.items_to_pack, 
-            lambda x: x['l'] * x['w'] * x['h']
+            key=lambda x: x['l'] * x['w'] * x['h'], 
+            reverse=True
         )
         
-        # Strategy B: Longest Side (max(L,W,H)) - Good for pipes/long items
-        pack_B, fail_B, vol_B = run_packing_simulation(
-            st.session_state.items_to_pack, 
-            lambda x: max(x['l'], x['w'], x['h'])
-        )
-        
-        # Strategy C: Widest Footprint (L*W) - Good for flat items
-        pack_C, fail_C, vol_C = run_packing_simulation(
-            st.session_state.items_to_pack, 
-            lambda x: x['l'] * x['w']
-        )
+        packer = Packer()
+        IGNORED_WEIGHT_LIMIT = 999999999 # Effectively disable weight checking
+        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
-        # --- COMPARE RESULTS ---
-        # We prefer fewer failures. If failures are equal, we prefer higher packed volume.
-        # List format: (Packer, FailCount, Volume, Name)
-        results = [
-            (pack_A, fail_A, vol_A, "Volume Sort"),
-            (pack_B, fail_B, vol_B, "Longest-Side Sort"),
-            (pack_C, fail_C, vol_C, "Area Sort")
-        ]
+        for i, item in enumerate(sorted_items):
+            # Create the Item object. We set weight to 1 as a dummy value.
+            p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
+            p_item.color = item['color'] 
+            packer.add_item(p_item)
+
+        # --- STEP 2: RUN ALGORITHM ---
+        # The 'packer.pack()' method tries to fit items into the bin
+        # based on available pivot points (corners) in the 3D space.
+        packer.pack()
+        box = packer.bins[0]
         
-        # Sort results: Primary key = FailCount (ascending), Secondary key = Volume (descending)
-        results.sort(key=lambda x: (x[1], -x[2]))
-        
-        # THE WINNER
-        winner_packer, winner_fail, winner_vol, winner_name = results[0]
-        winner_box = winner_packer.bins[0]
-        
-        # --- DISPLAY RESULTS ---
         col1, col2 = st.columns([1, 3])
         
         with col1:
-            st.subheader("Optimization Result")
-            st.success(f"🏆 Best Strategy: **{winner_name}**")
+            st.subheader("Results")
+            
+            # --- STEP 3: CALCULATE VOLUME MANUALLY ---
+            # We do this manually because the library's internal volume tracking
+            # can be confusing. We strictly sum L*W*H of items inside.
             
             total_box_volume = box_l * box_w * box_h
-            efficiency = (winner_vol / total_box_volume) * 100
+            packed_item_volume = 0
             
-            st.metric("Packed Items", len(winner_box.items))
-            st.metric("Volume Utilization", f"{efficiency:.1f}%")
-            st.caption(f"Used: {winner_vol:.2f} / Total: {total_box_volume:.2f}")
+            for item in box.items:
+                 # Sum volume of every item that successfully fit
+                 packed_item_volume += float(item.width) * float(item.height) * float(item.depth)
 
-            if len(winner_box.unfitted_items) == 0:
+            efficiency = (packed_item_volume / total_box_volume) * 100
+            
+            st.metric("Packed Items", len(box.items))
+            st.metric("Volume Utilization", f"{efficiency:.1f}%")
+            st.caption(f"Used: {packed_item_volume:.2f} / Total: {total_box_volume:.2f}")
+
+            if len(box.unfitted_items) == 0:
                 st.success("✅ All items fit!")
             else:
-                st.error(f"❌ {len(winner_box.unfitted_items)} items did NOT fit.")
+                st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
                 
-                for item in winner_box.unfitted_items:
-                    reason = analyze_failure(winner_box, item)
+                for item in box.unfitted_items:
+                    reason = analyze_failure(box, item)
                     with st.expander(f"{item.name} (Failed)", expanded=True):
                         st.write(f"**Reason:** {reason}")
                         st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
@@ -229,19 +195,19 @@ if st.button("Calculate Packing (Auto-Optimize)", type="primary"):
             fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
             # Draw Packed Items
-            for item in winner_box.items:
+            for item in box.items:
                 x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
                 w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
                 color = getattr(item, 'color', 'gray')
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
-            # Draw Unfitted Items
-            if len(winner_box.unfitted_items) > 0:
+            # Draw Unfitted Items (Stacked Outside)
+            if len(box.unfitted_items) > 0:
                 gap = box_l * 0.1
                 start_x = box_l + gap
                 current_z = 0
                 
-                for item in winner_box.unfitted_items:
+                for item in box.unfitted_items:
                     w, h, d = float(item.width), float(item.height), float(item.depth)
                     color = getattr(item, 'color', 'red')
                     fig.add_trace(get_cube_trace(start_x, 0, current_z, w, h, d, color, f"FAILED: {item.name}", opacity=0.5))
