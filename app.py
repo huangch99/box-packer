@@ -12,11 +12,29 @@ st.markdown("**Logic:** Items are automatically sorted by **Volume (Largest to S
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
 
+# Initialize Box Dims in Session State if not present (for the swap to work)
+if 'box_l' not in st.session_state: st.session_state.box_l = 12.0
+if 'box_w' not in st.session_state: st.session_state.box_w = 8.0
+if 'box_h' not in st.session_state: st.session_state.box_h = 6.0
+
+# --- CALLBACKS ---
+def swap_dims():
+    """Swaps Width and Height values in session state"""
+    temp = st.session_state.box_w
+    st.session_state.box_w = st.session_state.box_h
+    st.session_state.box_h = temp
+
 # --- SIDEBAR: CONFIGURATION ---
 st.sidebar.header("1. Define Box (Inner Dims)")
-box_l = st.sidebar.number_input("Box Length", value=12.0)
-box_w = st.sidebar.number_input("Box Width", value=12.0)
-box_h = st.sidebar.number_input("Box Height", value=12.0)
+
+# We use the 'key' argument so we can modify these values programmatically via the Swap button
+box_l = st.sidebar.number_input("Box Length", min_value=0.1, key='box_l')
+box_w = st.sidebar.number_input("Box Width", min_value=0.1, key='box_w')
+box_h = st.sidebar.number_input("Box Height", min_value=0.1, key='box_h')
+
+# The Swap Button
+st.sidebar.button("🔄 Swap Width ↔ Height", on_click=swap_dims, help="Click to switch Width and Height dimensions")
+
 st.sidebar.caption("Weight capacity is disabled (Calculates by Size only)")
 
 st.sidebar.markdown("---")
@@ -45,7 +63,7 @@ if st.sidebar.button("Clear Entire List"):
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 
 if len(st.session_state.items_to_pack) > 0:
-    # Create a header row
+    # Header
     h1, h2, h3, h4, h5 = st.columns([1, 3, 2, 1, 1])
     h1.markdown("**No.**")
     h2.markdown("**Name**")
@@ -55,25 +73,18 @@ if len(st.session_state.items_to_pack) > 0:
     
     st.markdown("---")
 
-    # Loop through items and display them with a delete button
-    # We enumerate so we have the index 'i' to delete the specific item
+    # List Items
     for i, item in enumerate(st.session_state.items_to_pack):
         c1, c2, c3, c4, c5 = st.columns([1, 3, 2, 1, 1])
         
-        with c1:
-            st.write(f"#{i+1}")
-        with c2:
-            st.write(item['name'])
-        with c3:
-            st.write(f"{item['l']} x {item['w']} x {item['h']}")
-        with c4:
-            # Show a small color block
-            st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
+        with c1: st.write(f"#{i+1}")
+        with c2: st.write(item['name'])
+        with c3: st.write(f"{item['l']} x {item['w']} x {item['h']}")
+        with c4: st.color_picker("", item['color'], disabled=True, label_visibility="collapsed", key=f"col_{i}")
         with c5:
-            # The Delete Button
             if st.button("🗑️", key=f"remove_{i}"):
                 st.session_state.items_to_pack.pop(i)
-                st.rerun() # Immediately refresh the app to show the item is gone
+                st.rerun()
 else:
     st.info("Add items from the sidebar to start.")
 
@@ -130,7 +141,8 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         
         packer = Packer()
         IGNORED_WEIGHT_LIMIT = 999999999 
-        packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
+        # NOTE: We must use st.session_state values here because they are the 'live' values
+        packer.add_bin(Bin('MainBox', st.session_state.box_l, st.session_state.box_w, st.session_state.box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(sorted_items):
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
@@ -145,7 +157,7 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
         with col1:
             st.subheader("Results")
             
-            total_volume = box_l * box_w * box_h
+            total_volume = st.session_state.box_l * st.session_state.box_w * st.session_state.box_h
             used_volume = float(box.get_volume())
             efficiency = (used_volume / total_volume) * 100
             
@@ -165,11 +177,11 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
                         st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
 
         with col2:
-            max_x_draw = box_l
+            max_x_draw = st.session_state.box_l
             fig = go.Figure()
             
-            # Draw Wireframe
-            fig.add_trace(get_wireframe(box_l, box_w, box_h))
+            # Draw Wireframe using session_state dims
+            fig.add_trace(get_wireframe(st.session_state.box_l, st.session_state.box_w, st.session_state.box_h))
             
             # Draw Packed Items
             for item in box.items:
@@ -180,8 +192,8 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
 
             # Draw Unfitted Items
             if len(box.unfitted_items) > 0:
-                gap = box_l * 0.1
-                start_x = box_l + gap
+                gap = st.session_state.box_l * 0.1
+                start_x = st.session_state.box_l + gap
                 current_z = 0
                 
                 for item in box.unfitted_items:
@@ -202,8 +214,8 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
             layout = go.Layout(
                 scene=dict(
                     xaxis=dict(title='Length (x)', range=[0, max_x_draw * 1.1]),
-                    yaxis=dict(title='Width (y)', range=[0, max(box_w, box_l)]),
-                    zaxis=dict(title='Height (z)', range=[0, max(box_h, box_l)]),
+                    yaxis=dict(title='Width (y)', range=[0, max(st.session_state.box_w, st.session_state.box_l)]),
+                    zaxis=dict(title='Height (z)', range=[0, max(st.session_state.box_h, st.session_state.box_l)]),
                     aspectmode='data'
                 ),
                 margin=dict(l=0, r=0, b=0, t=0),
