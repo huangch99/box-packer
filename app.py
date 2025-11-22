@@ -8,7 +8,6 @@ st.title("📦 Multi-Item Shipping Calculator")
 st.markdown("**Logic:** Uses the `py3dbp` algorithm to stack multiple items (Tetris-style) into a single box.")
 
 # --- SESSION STATE INITIALIZATION ---
-# This keeps track of the items you add to the list
 if 'items_to_pack' not in st.session_state:
     st.session_state.items_to_pack = []
 
@@ -30,7 +29,6 @@ i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
 if st.sidebar.button("Add Item to List"):
-    # Add the item details to session state
     for _ in range(int(i_qty)):
         st.session_state.items_to_pack.append({
             "name": item_name,
@@ -45,19 +43,12 @@ if st.sidebar.button("Clear List"):
 # --- MAIN PANEL: ITEM LIST ---
 st.subheader(f"Current Item List ({len(st.session_state.items_to_pack)} items)")
 if len(st.session_state.items_to_pack) > 0:
-    # Display a small summary of added items
     st.dataframe(st.session_state.items_to_pack)
 else:
     st.info("Add items from the sidebar to start.")
 
 # --- VISUALIZATION FUNCTIONS ---
 def get_cube_trace(x, y, z, l, w, h, color, name, opacity=1.0):
-    """
-    Draws a 3D cube using plotly mesh3d.
-    x, y, z: Bottom-left-front corner coordinates
-    l, w, h: Dimensions
-    """
-    # 8 vertices of the cube
     x_pts = [x, x+l, x+l, x, x, x+l, x+l, x]
     y_pts = [y, y, y+w, y+w, y, y, y+w, y+w]
     z_pts = [z, z, z, z, z+h, z+h, z+h, z+h]
@@ -75,11 +66,10 @@ def get_cube_trace(x, y, z, l, w, h, color, name, opacity=1.0):
     )
 
 def get_wireframe(l, w, h):
-    # Simple wireframe for the container box
     pts = [
-        (0,0,0), (l,0,0), (l,w,0), (0,w,0), (0,0,0), # Bottom
-        (0,0,h), (l,0,h), (l,w,h), (0,w,h), (0,0,h), # Top
-        (0,0,h), (0,0,0), (l,0,0), (l,0,h),          # Verticals
+        (0,0,0), (l,0,0), (l,w,0), (0,w,0), (0,0,0),
+        (0,0,h), (l,0,h), (l,w,h), (0,w,h), (0,0,h),
+        (0,0,h), (0,0,0), (l,0,0), (l,0,h),
         (l,w,h), (l,w,0), (0,w,0), (0,w,h)
     ]
     X = [p[0] for p in pts]
@@ -92,28 +82,17 @@ if st.button("Calculate Packing", type="primary"):
     if not st.session_state.items_to_pack:
         st.warning("Please add items first.")
     else:
-        # 1. Init Packer
         packer = Packer()
-        
-        # 2. Add Bin (Container)
-        # Name, W, H, D, Max Weight. 
-        # Note: py3dbp uses (W, H, D) order usually, but we map L->W, W->H, H->D for consistency
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, max_weight))
 
-        # 3. Add Items
-        # We assign the color as a property to retrieve later
         for i, item in enumerate(st.session_state.items_to_pack):
-            # Item(name, width, height, depth, weight)
-            # We use a dummy weight of 1 since user didn't input weights per item
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
-        # 4. Run Packing
         packer.pack()
 
-        # 5. Process Results
-        box = packer.bins[0] # We only have one bin
+        box = packer.bins[0]
         
         col1, col2 = st.columns([1, 3])
         
@@ -125,7 +104,13 @@ if st.button("Calculate Packing", type="primary"):
                 st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
             
             st.metric("Packed Items", len(box.items))
-            st.metric("Volume Utilization", f"{box.get_volume() / (box_l*box_w*box_h) * 100:.1f}%")
+            
+            # --- FIX START: Convert Decimal to Float ---
+            total_volume = box_l * box_w * box_h
+            used_volume = float(box.get_volume()) # Converted to float here
+            efficiency = (used_volume / total_volume) * 100
+            st.metric("Volume Utilization", f"{efficiency:.1f}%")
+            # --- FIX END ---
             
             if box.unfitted_items:
                 st.warning("Items left behind:")
@@ -133,7 +118,6 @@ if st.button("Calculate Packing", type="primary"):
                     st.write(f"- {item.name}")
 
         with col2:
-            # 6. Visualization
             layout = go.Layout(
                 scene=dict(
                     xaxis=dict(title='Length (x)', range=[0, box_l]),
@@ -147,20 +131,12 @@ if st.button("Calculate Packing", type="primary"):
             )
             
             fig = go.Figure(layout=layout)
-            
-            # Draw Container Wireframe
             fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
-            # Draw Packed Items
             for item in box.items:
-                # item.position gives [x, y, z] (decimal)
-                # item.get_dimension() gives [w, h, d] (decimal) after rotation
                 x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
                 w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
-                
-                # Retrieve color we stored earlier (or default to gray)
                 color = getattr(item, 'color', 'gray')
-                
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
             st.plotly_chart(fig, use_container_width=True)
