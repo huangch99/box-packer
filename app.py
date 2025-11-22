@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from py3dbp import Packer, Bin, Item
 import decimal
+import random  # Needed for random color generation
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
@@ -34,18 +35,22 @@ i_w = c2.number_input("W", min_value=0.1, value=5.0)
 i_h = c3.number_input("H", min_value=0.1, value=5.0)
 
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
-i_color = st.sidebar.color_picker("Color", "#00CC96")
 
-# --- ACTION: ADD ITEM ---
+# --- ACTION: ADD ITEM (Auto Random Color) ---
 if st.sidebar.button("Add Item to List"):
+    # Generate a random hex color
+    # We generate a random integer between 0 and 0xFFFFFF and format it as hex
+    rand_color = "#{:06x}".format(random.randint(0, 0xFFFFFF))
+    
     for _ in range(int(i_qty)):
         st.session_state.items_to_pack.append({
             "name": item_name,
             "l": i_l, 
             "w": i_w, 
             "h": i_h,
-            "color": i_color
+            "color": rand_color # Assign the random color here
         })
+    
     st.session_state.status_msg = f"✅ Successfully added {i_qty} x {item_name}"
     st.session_state.status_type = "success"
     st.rerun()
@@ -150,7 +155,6 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
     if not st.session_state.items_to_pack:
         st.warning("Please add items first.")
     else:
-        # Sort items (Backup sorting)
         sorted_items = sorted(
             st.session_state.items_to_pack, 
             key=lambda x: x['l'] * x['w'] * x['h'], 
@@ -166,10 +170,6 @@ if st.button("Calculate Packing (Largest First)", type="primary"):
             p_item.color = item['color'] 
             packer.add_item(p_item)
 
-        # --- UPDATED PACK COMMAND ---
-        # 'fill=both' is not valid in py3dbp. 
-        # We use bigger_first=True (standard filling strategy) 
-        # and distribute_items=False (fill one bin completely).
         packer.pack(bigger_first=True, distribute_items=False)
         
         box = packer.bins[0]
