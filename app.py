@@ -6,7 +6,7 @@ import decimal
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Multi-Item Box Visualizer", layout="wide")
 st.title("📦 Multi-Item Shipping Calculator")
-st.markdown("**Logic:** Uses the `py3dbp` algorithm to stack multiple items (Tetris-style) into a single box based on **Dimensions Only**.")
+st.markdown("**Logic:** Uses the `py3dbp` algorithm. Items that **do not fit** will be stacked outside the box for visual comparison.")
 
 # --- SESSION STATE INITIALIZATION ---
 if 'items_to_pack' not in st.session_state:
@@ -17,7 +17,8 @@ st.sidebar.header("1. Define Box (Inner Dims)")
 box_l = st.sidebar.number_input("Box Length", value=12.0)
 box_w = st.sidebar.number_input("Box Width", value=12.0)
 box_h = st.sidebar.number_input("Box Height", value=12.0)
-# Weight input removed. Internally we set this to infinity.
+# Internally set weight to infinity
+st.sidebar.caption("Weight capacity is disabled (Calculates by Size only)")
 
 st.sidebar.markdown("---")
 st.sidebar.header("2. Add Items")
@@ -26,7 +27,6 @@ c1, c2, c3 = st.sidebar.columns(3)
 i_l = c1.number_input("L", value=5.0)
 i_w = c2.number_input("W", value=5.0)
 i_h = c3.number_input("H", value=5.0)
-# Item weight input removed.
 i_qty = st.sidebar.number_input("Qty", value=1, min_value=1)
 i_color = st.sidebar.color_picker("Color", "#00CC96")
 
@@ -105,7 +105,7 @@ if st.button("Calculate Packing", type="primary"):
         packer.add_bin(Bin('MainBox', box_l, box_w, box_h, IGNORED_WEIGHT_LIMIT))
 
         for i, item in enumerate(st.session_state.items_to_pack):
-            # We give every item a dummy weight of 1. It doesn't matter because limit is infinity.
+            # We give every item a dummy weight of 1.
             p_item = Item(f"{item['name']}-{i}", item['l'], item['w'], item['h'], 1)
             p_item.color = item['color'] 
             packer.add_item(p_item)
@@ -132,6 +132,7 @@ if st.button("Calculate Packing", type="primary"):
                 st.success("✅ All items fit!")
             else:
                 st.error(f"❌ {len(box.unfitted_items)} items did NOT fit.")
+                st.info("Unfitted items are shown OUTSIDE the box.")
                 st.markdown("### Failed Items Analysis:")
                 
                 for item in box.unfitted_items:
@@ -141,25 +142,60 @@ if st.button("Calculate Packing", type="primary"):
                         st.caption(f"Dims: {float(item.width)}x{float(item.height)}x{float(item.depth)}")
 
         with col2:
-            layout = go.Layout(
-                scene=dict(
-                    xaxis=dict(title='Length (x)', range=[0, box_l]),
-                    yaxis=dict(title='Width (y)', range=[0, box_w]),
-                    zaxis=dict(title='Height (z)', range=[0, box_h]),
-                    aspectmode='manual',
-                    aspectratio=dict(x=1, y=box_w/box_l, z=box_h/box_l)
-                ),
-                margin=dict(l=0, r=0, b=0, t=0),
-                height=600
-            )
+            # Calculate plot limits to include external items
+            max_x_draw = box_l
             
-            fig = go.Figure(layout=layout)
+            fig = go.Figure()
+            
+            # 1. Draw Container Wireframe
             fig.add_trace(get_wireframe(box_l, box_w, box_h))
             
+            # 2. Draw Packed Items (Fitted)
             for item in box.items:
                 x, y, z = float(item.position[0]), float(item.position[1]), float(item.position[2])
                 w, h, d = float(item.get_dimension()[0]), float(item.get_dimension()[1]), float(item.get_dimension()[2])
                 color = getattr(item, 'color', 'gray')
                 fig.add_trace(get_cube_trace(x, y, z, w, h, d, color, item.name))
 
+            # 3. Draw Unfitted Items (Outside the box)
+            if len(box.unfitted_items) > 0:
+                # Start stacking them to the right of the box with a small gap
+                gap = box_l * 0.1
+                start_x = box_l + gap
+                current_z = 0
+                
+                for item in box.unfitted_items:
+                    # We use original dims because rotation wasn't calculated for unfitted items
+                    w, h, d = float(item.width), float(item.height), float(item.depth)
+                    
+                    # Draw trace
+                    color = getattr(item, 'color', 'red')
+                    fig.add_trace(get_cube_trace(start_x, 0, current_z, w, h, d, color, f"FAILED: {item.name}", opacity=0.5))
+                    
+                    # Stack upwards
+                    current_z += d
+                    # Update max X for camera scaling
+                    if (start_x + w) > max_x_draw:
+                        max_x_draw = start_x + w
+
+                # Add a label for the overflow stack
+                fig.add_trace(go.Scatter3d(
+                    x=[start_x], y=[0], z=[current_z + 1],
+                    mode='text', text=['Did Not Fit'],
+                    textfont=dict(color='red', size=12)
+                ))
+
+            # Update Layout for Aspect Ratio
+            layout = go.Layout(
+                scene=dict(
+                    xaxis=dict(title='Length (x)', range=[0, max_x_draw * 1.1]),
+                    yaxis=dict(title='Width (y)', range=[0, max(box_w, box_l)]), # Keep proportional
+                    zaxis=dict(title='Height (z)', range=[0, max(box_h, box_l)]),
+                    aspectmode='data' # This forces 1 unit = 1 unit visually
+                ),
+                margin=dict(l=0, r=0, b=0, t=0),
+                height=600
+            )
+            
+            fig.update_layout(layout)
             st.plotly_chart(fig, use_container_width=True)
